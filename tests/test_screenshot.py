@@ -9,7 +9,7 @@ import io
 import pytest
 from PIL import Image
 
-from src.screenshot import capture_monitor, capture_to_bytes, list_monitors
+from arma_watcher.screenshot import capture_monitor, capture_to_bytes, list_monitors
 
 
 # ---------------------------------------------------------------------------
