@@ -1,9 +1,9 @@
 import re
 
-from ollama import chat
+from ollama import chat, generate
 from pydantic import BaseModel
 
-MODEL = "gemma4:e4b"
+MODEL = "qwen3.5:9b"
 
 QUEUE_PROMPT = (
     "This is a screenshot from an Arma Reforger server browser queue. "
@@ -89,6 +89,10 @@ class Inference:
             return ScreenState.model_validate_json(response.message.content)
         except Exception:
             return ScreenState(in_queue=False, in_game=False, position=0, server_name="")
+
+    def unload(self) -> None:
+        """Evict the model from Ollama VRAM immediately (keep_alive=0)."""
+        generate(model=self.model, keep_alive=0)
 
     @staticmethod
     def _parse(content: str) -> QueueInfo:

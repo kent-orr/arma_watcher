@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-from arma_watcher.inference import Inference, ScreenState
+from arma_watcher.inference import Inference, MODEL, ScreenState
 from arma_watcher.screenshot import capture_to_bytes, list_monitors
 
 
@@ -26,10 +26,12 @@ class ArmaWatcher:
         monitor_index: int | None = None,
         queue_interval: int = 20,
         detect_interval: int = 5,
+        model: str = MODEL,
     ):
         self.monitor_index = monitor_index
         self.queue_interval = queue_interval
         self.detect_interval = detect_interval
+        self.model = model
         self.server_name: str | None = None
         self.history: list[QueueEntry] = []
         self.state = (
@@ -51,7 +53,8 @@ class ArmaWatcher:
                     self._step_searching_queue()
                 elif self.state == WatcherState.IN_QUEUE:
                     self._step_in_queue()
-            self._log("You're in the game!")
+            Inference(model=self.model).unload()  # free VRAM — we're in, don't need the LLM anymore
+            self._log("You're in the game! LLM unloaded from VRAM.")
         except KeyboardInterrupt:
             print("\nStopped.")
 
@@ -61,7 +64,7 @@ class ArmaWatcher:
 
     def _step_searching_arma(self) -> None:
         self._log("Scanning monitors for Arma Reforger...")
-        inference = Inference()
+        inference = Inference(model=self.model)
         for i in range(1, len(list_monitors())):
             if inference.is_arma(capture_to_bytes(i)):
                 self.monitor_index = i
@@ -101,7 +104,7 @@ class ArmaWatcher:
     # ------------------------------------------------------------------
 
     def _get_screen_state(self) -> ScreenState:
-        return Inference().get_screen_state(capture_to_bytes(self.monitor_index))
+        return Inference(model=self.model).get_screen_state(capture_to_bytes(self.monitor_index))
 
     def _record(self, position: int) -> None:
         self.history.append(QueueEntry(datetime.now(), position))
