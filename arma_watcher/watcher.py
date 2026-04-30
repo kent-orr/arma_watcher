@@ -1,10 +1,21 @@
+import json
 import time
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
 from arma_watcher.inference import Inference, MODEL, ScreenState
 from arma_watcher.screenshot import capture_to_bytes, list_monitors
+
+
+def _notify_discord(url: str, msg: str) -> None:
+    data = json.dumps({"content": msg}).encode()
+    req = urllib.request.Request(url, data, {"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass
 
 
 class WatcherState(Enum):
@@ -27,11 +38,13 @@ class ArmaWatcher:
         queue_interval: int = 20,
         detect_interval: int = 5,
         model: str = MODEL,
+        discord_url: str | None = None,
     ):
         self.monitor_index = monitor_index
         self.queue_interval = queue_interval
         self.detect_interval = detect_interval
         self.model = model
+        self.discord_url = discord_url
         self.server_name: str | None = None
         self.history: list[QueueEntry] = []
         self.state = (
@@ -55,6 +68,8 @@ class ArmaWatcher:
                     self._step_in_queue()
             Inference(model=self.model).unload()  # free VRAM — we're in, don't need the LLM anymore
             self._log("You're in the game! LLM unloaded from VRAM.")
+            if self.discord_url:
+                _notify_discord(self.discord_url, "You're in the game! Get on the server.")
         except KeyboardInterrupt:
             print("\nStopping — unloading model from VRAM...")
             try:
@@ -140,4 +155,7 @@ class ArmaWatcher:
         server = self.server_name or "unknown server"
         rate_str = f"{rate:.1f}/min" if rate is not None else "--"
         eta_str = f"~{eta:.0f}min" if eta is not None else "--"
-        self._log(f"Position: {position} | {server} | Rate: {rate_str} | ETA: {eta_str}")
+        msg = f"Position: {position} | {server} | Rate: {rate_str} | ETA: {eta_str}"
+        self._log(msg)
+        if self.discord_url:
+            _notify_discord(self.discord_url, msg)
