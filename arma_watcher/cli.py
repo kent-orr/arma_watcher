@@ -30,6 +30,13 @@ def _parse_args() -> argparse.Namespace:
         dest="detect_interval",
         help="interval in seconds between Arma/queue detection attempts (default: 5)",
     )
+    parser.add_argument(
+        "--discord-webhook",
+        metavar="URL",
+        default=None,
+        dest="discord_webhook",
+        help="Discord webhook URL to post queue updates and game entry notifications",
+    )
     return parser.parse_args()
 
 
@@ -39,5 +46,6 @@ def main() -> None:
         monitor_index=args.monitor,
         queue_interval=args.interval,
         detect_interval=args.detect_interval,
+        discord_url=args.discord_webhook,
     )
     watcher.run()
