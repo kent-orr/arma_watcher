@@ -56,7 +56,13 @@ class ArmaWatcher:
             Inference(model=self.model).unload()  # free VRAM — we're in, don't need the LLM anymore
             self._log("You're in the game! LLM unloaded from VRAM.")
         except KeyboardInterrupt:
-            print("\nStopped.")
+            print("\nStopping — unloading model from VRAM...")
+            try:
+                Inference(model=self.model).unload()
+                print("Model unloaded.")
+            except Exception as e:
+                print(f"Could not unload model: {e}")
+            print("Stopped.")
 
     # ------------------------------------------------------------------
     # State steps
