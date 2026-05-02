@@ -1,21 +1,30 @@
 import json
 import time
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import TypeVar
+
+_T = TypeVar("_T")
 
 from arma_watcher.inference import Inference, MODEL, ScreenState
 from arma_watcher.screenshot import capture_to_bytes, list_monitors
 
 
-def _notify_discord(url: str, msg: str) -> None:
+def _notify_discord(url: str, msg: str) -> bool:
     data = json.dumps({"content": msg}).encode()
-    req = urllib.request.Request(url, data, {"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        url, data,
+        {"Content-Type": "application/json", "User-Agent": "ArmaWatcher/1.0"},
+    )
     try:
         urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        print(f"[discord] failed to send notification: {e}")
+        return False
 
 
 class WatcherState(Enum):
@@ -58,6 +67,12 @@ class ArmaWatcher:
     # ------------------------------------------------------------------
 
     def run(self) -> None:
+        if self.discord_url:
+            ok = _notify_discord(self.discord_url, "Watching for queue...")
+            if ok:
+                self._log("Discord webhook OK.")
+            else:
+                self._log("Discord webhook FAILED — check URL in config.")
         try:
             while self.state != WatcherState.IN_GAME:
                 if self.state == WatcherState.SEARCHING_ARMA:
@@ -69,7 +84,7 @@ class ArmaWatcher:
             Inference(model=self.model).unload()  # free VRAM — we're in, don't need the LLM anymore
             self._log("You're in the game! LLM unloaded from VRAM.")
             if self.discord_url:
-                _notify_discord(self.discord_url, "You're in the game! Get on the server.")
+                _notify_discord(self.discord_url, "You're in! Get on the server.")
         except KeyboardInterrupt:
             print("\nStopping — unloading model from VRAM...")
             try:
@@ -87,7 +102,7 @@ class ArmaWatcher:
         self._log("Scanning monitors for Arma Reforger...")
         inference = Inference(model=self.model)
         for i in range(1, len(list_monitors())):
-            if inference.is_arma(capture_to_bytes(i)):
+            if self._ollama_call(lambda i=i: inference.is_arma(capture_to_bytes(i))):
                 self.monitor_index = i
                 self.state = WatcherState.SEARCHING_QUEUE
                 self._log(f"Arma Reforger detected on monitor {i}. Waiting for queue...")
@@ -125,7 +140,21 @@ class ArmaWatcher:
     # ------------------------------------------------------------------
 
     def _get_screen_state(self) -> ScreenState:
-        return Inference(model=self.model).get_screen_state(capture_to_bytes(self.monitor_index))
+        return self._ollama_call(
+            lambda: Inference(model=self.model).get_screen_state(capture_to_bytes(self.monitor_index))
+        )
+
+    def _ollama_call(self, fn: Callable[[], _T]) -> _T:
+        _OLLAMA_RETRY = 15
+        while True:
+            try:
+                return fn()
+            except ConnectionError:
+                self._log(
+                    f"Ollama is not running. Start Ollama and this watcher will resume automatically. "
+                    f"Retrying in {_OLLAMA_RETRY}s..."
+                )
+                time.sleep(_OLLAMA_RETRY)
 
     def _record(self, position: int) -> None:
         self.history.append(QueueEntry(datetime.now(), position))
@@ -155,7 +184,11 @@ class ArmaWatcher:
         server = self.server_name or "unknown server"
         rate_str = f"{rate:.1f}/min" if rate is not None else "--"
         eta_str = f"~{eta:.0f}min" if eta is not None else "--"
-        msg = f"Position: {position} | {server} | Rate: {rate_str} | ETA: {eta_str}"
-        self._log(msg)
+        self._log(f"Position: {position} | {server} | Rate: {rate_str} | ETA: {eta_str}")
         if self.discord_url:
-            _notify_discord(self.discord_url, msg)
+            discord_msg = f"Position: {position}"
+            if eta is not None:
+                discord_msg += f" | ETA: ~{eta:.0f}min"
+            elif rate is not None:
+                discord_msg += f" | Rate: {rate_str}"
+            _notify_discord(self.discord_url, discord_msg)
