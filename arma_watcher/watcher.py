@@ -9,6 +9,8 @@ from typing import TypeVar
 
 _T = TypeVar("_T")
 
+import ollama
+
 from arma_watcher.inference import Inference, MODEL, ScreenState
 from arma_watcher.screenshot import capture_to_bytes, list_monitors
 
@@ -23,7 +25,10 @@ def _notify_discord(url: str, msg: str) -> bool:
         urllib.request.urlopen(req, timeout=5)
         return True
     except Exception as e:
-        print(f"[discord] failed to send notification: {e}")
+        masked = url[:40] + "..." if len(url) > 40 else url
+        print(f"[discord] failed to send notification — {type(e).__name__}: {e}")
+        print(f"[discord] webhook: {masked}")
+        print(f"[discord] message attempted: {msg!r}")
         return False
 
 
@@ -40,6 +45,30 @@ class QueueEntry:
     position: int
 
 
+@dataclass
+class MessagePlan:
+    message_ints: list[int]  # positions to notify at (descending)
+    messages: list[str]      # one message per threshold, same order
+
+
+_MILESTONES = [
+    (30, "Still waiting — 30 to go."),
+    (20, "Getting closer — 20 to go."),
+    (10, "Only 10 left!"),
+    (5,  "Almost there — 5 to go!"),
+    (3,  "3 more!"),
+    (1,  "Next up!"),
+]
+
+
+def _default_message_plan(initial_position: int) -> MessagePlan:
+    pairs = [(pos, msg) for pos, msg in _MILESTONES if pos < initial_position]
+    if not pairs:
+        return MessagePlan([], [])
+    ints, msgs = zip(*pairs)
+    return MessagePlan(list(ints), list(msgs))
+
+
 class ArmaWatcher:
     def __init__(
         self,
@@ -48,14 +77,18 @@ class ArmaWatcher:
         detect_interval: int = 5,
         model: str = MODEL,
         discord_url: str | None = None,
+        discord_user_id: str | None = None,
     ):
         self.monitor_index = monitor_index
         self.queue_interval = queue_interval
         self.detect_interval = detect_interval
         self.model = model
         self.discord_url = discord_url
+        self.discord_user_id = discord_user_id
         self.server_name: str | None = None
         self.history: list[QueueEntry] = []
+        self.message_plan: MessagePlan | None = None
+        self._notified_thresholds: set[int] = set()
         self.state = (
             WatcherState.SEARCHING_QUEUE
             if monitor_index is not None
@@ -84,7 +117,7 @@ class ArmaWatcher:
             Inference(model=self.model).unload()  # free VRAM — we're in, don't need the LLM anymore
             self._log("You're in the game! LLM unloaded from VRAM.")
             if self.discord_url:
-                _notify_discord(self.discord_url, "You're in! Get on the server.")
+                _notify_discord(self.discord_url, f"{self._mention}You're in! Get on the server.")
         except KeyboardInterrupt:
             print("\nStopping — unloading model from VRAM...")
             try:
@@ -115,6 +148,15 @@ class ArmaWatcher:
             self.server_name = screen.server_name or self.server_name
             self.state = WatcherState.IN_QUEUE
             self._record(screen.position)
+            self.message_plan = _default_message_plan(screen.position)
+            if self.discord_url:
+                server = self.server_name or "unknown server"
+                eta = self._predicted_minutes()
+                eta_str = f" | ETA: ~{eta:.0f}min" if eta is not None else ""
+                _notify_discord(
+                    self.discord_url,
+                    f"{self._mention}You're in the queue at position {screen.position} on {server}.{eta_str}",
+                )
             self._log_queue(screen.position)
         elif screen.in_game:
             self.state = WatcherState.IN_GAME
@@ -155,6 +197,9 @@ class ArmaWatcher:
                     f"Retrying in {_OLLAMA_RETRY}s..."
                 )
                 time.sleep(_OLLAMA_RETRY)
+            except ollama.ResponseError as e:
+                self._log(f"Ollama error ({e.status_code}): {e.error}. Retrying in {_OLLAMA_RETRY}s...")
+                time.sleep(_OLLAMA_RETRY)
 
     def _record(self, position: int) -> None:
         self.history.append(QueueEntry(datetime.now(), position))
@@ -175,6 +220,10 @@ class ArmaWatcher:
             return None
         return self.history[-1].position / rate
 
+    @property
+    def _mention(self) -> str:
+        return f"<@{self.discord_user_id}> " if self.discord_user_id else ""
+
     def _log(self, msg: str) -> None:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
@@ -185,10 +234,10 @@ class ArmaWatcher:
         rate_str = f"{rate:.1f}/min" if rate is not None else "--"
         eta_str = f"~{eta:.0f}min" if eta is not None else "--"
         self._log(f"Position: {position} | {server} | Rate: {rate_str} | ETA: {eta_str}")
-        if self.discord_url:
-            discord_msg = f"Position: {position}"
-            if eta is not None:
-                discord_msg += f" | ETA: ~{eta:.0f}min"
-            elif rate is not None:
-                discord_msg += f" | Rate: {rate_str}"
-            _notify_discord(self.discord_url, discord_msg)
+        if not self.discord_url or self.message_plan is None:
+            return
+        for threshold, message in zip(self.message_plan.message_ints, self.message_plan.messages):
+            if position <= threshold and threshold not in self._notified_thresholds:
+                self._notified_thresholds.add(threshold)
+                detail = f" | Position: {position} | Server: {server} | ETA: {eta_str}"
+                _notify_discord(self.discord_url, self._mention + message + detail)

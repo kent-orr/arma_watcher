@@ -1,4 +1,2 @@
 @echo off
-cd /d "%~dp0"
-uv run arma-watcher
-pause
+powershell -NoLogo -ExecutionPolicy Bypass -File "%~dp0run.ps1"

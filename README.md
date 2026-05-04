@@ -87,6 +87,16 @@ Paste a Discord incoming webhook URL to receive queue position updates in a chan
 
 To create one: *Discord channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL*.
 
+#### Discord user ID *(optional)*
+
+```
+Discord user ID for @mentions (optional — enable Developer Mode, right-click your name, Copy User ID) [none]:
+```
+
+Paste your numeric Discord user ID to be @mentioned directly in queue notifications. Leave blank to send notifications without a ping.
+
+To find your ID: *Discord Settings → Advanced → enable Developer Mode*, then right-click your username anywhere and select **Copy User ID**.
+
 #### Monitor index
 
 ```
@@ -138,6 +148,23 @@ uv run arma-watcher
 
 Once you enter the game the watcher unloads the model from VRAM and sends a final Discord notification.
 
+### Discord notifications
+
+Instead of sending a message on every queue poll, the watcher sends a small set of milestone pings so your channel doesn't get spammed:
+
+| Event | Message |
+|---|---|
+| Queue detected | `@you You're in the queue at position 47 on My Server. \| ETA: ~12min` |
+| Position ≤ 30 | `Still waiting — 30 to go. \| Position: 28 \| Server: ... \| ETA: ~7min` |
+| Position ≤ 20 | `Getting closer — 20 to go. \| ...` |
+| Position ≤ 10 | `Only 10 left! \| ...` |
+| Position ≤ 5 | `Almost there — 5 to go! \| ...` |
+| Position ≤ 3 | `3 more! \| ...` |
+| Position ≤ 1 | `Next up! \| ...` |
+| In game | `@you You're in! Get on the server.` |
+
+Milestones that the queue starts below are skipped (e.g. if you join at position 8, the 30 and 20 messages are never sent). The `@you` ping is only included if a Discord user ID is configured.
+
 Press **Ctrl+C** at any time to stop. The model is unloaded from VRAM automatically on exit.
 
 ### Ollama not running?
@@ -149,6 +176,19 @@ If Ollama isn't started when the watcher launches, it waits and retries automati
 ```
 
 Start Ollama and the watcher will continue without needing a restart.
+
+---
+
+## Updating
+
+To pull the latest version without needing git, double-click **`update.bat`** in the repo root.
+
+It will:
+1. Download the latest `main` branch zip from GitHub
+2. Replace the `arma_watcher/` package files and scripts
+3. Run `uv sync` to update dependencies
+
+Your config (`C:\Users\<you>\.arma_watcher\config.json`) is never touched.
 
 ---
 

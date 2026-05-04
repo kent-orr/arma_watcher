@@ -56,6 +56,7 @@ def main() -> None:
     interval = args.interval if args.interval is not None else saved.get("interval", 20)
     detect_interval = args.detect_interval if args.detect_interval is not None else saved.get("detect_interval", 5)
     discord_url = args.discord_webhook if args.discord_webhook is not None else saved.get("discord_webhook")
+    discord_user_id = saved.get("discord_user_id")
     model = saved.get("model", "qwen3.5:9b")
 
     watcher = ArmaWatcher(
@@ -63,6 +64,7 @@ def main() -> None:
         queue_interval=interval,
         detect_interval=detect_interval,
         discord_url=discord_url,
+        discord_user_id=discord_user_id,
         model=model,
     )
     watcher.run()

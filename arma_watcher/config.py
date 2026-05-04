@@ -8,6 +8,7 @@ CONFIG_PATH = pathlib.Path.home() / ".arma_watcher" / "config.json"
 
 DEFAULTS = {
     "discord_webhook": None,
+    "discord_user_id": None,
     "model": "qwen3.5:9b",
     "monitor": None,
     "interval": 20,
@@ -23,6 +24,7 @@ _MODELS = [
 
 _PROMPTS = [
     ("discord_webhook", "Discord webhook URL", None),
+    ("discord_user_id", "Discord user ID for @mentions (optional — enable Developer Mode, right-click your name, Copy User ID)", None),
     ("monitor", "Monitor index (leave blank to auto-detect)", None),
     ("interval", "Queue poll interval in seconds", 20),
     ("detect_interval", "Detection retry interval in seconds", 5),
