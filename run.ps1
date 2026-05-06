@@ -1,4 +1,4 @@
 Set-Location $PSScriptRoot
-uv run arma-watcher
+uv run python -m arma_watcher
 Write-Host "`nPress any key to close..."
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
