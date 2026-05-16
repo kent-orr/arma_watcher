@@ -1,6 +1,6 @@
 import argparse
 
-from arma_watcher import config as cfg_mod
+from arma_watcher import config as cfg_mod, updater
 from arma_watcher.watcher import ArmaWatcher
 
 
@@ -48,6 +48,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    updater.check_for_updates()
 
     saved = cfg_mod.run_setup(force=args.setup)
 
