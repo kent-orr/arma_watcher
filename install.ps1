@@ -52,23 +52,24 @@ Write-Step "Installing Python dependencies..."
 uv sync
 Write-OK "Dependencies installed."
 
-# First-time setup wizard
-Write-Step "Starting first-time setup..."
-Write-Host ""
-uv run arma-watcher --setup
-
-$runBat    = Join-Path $PSScriptRoot "run.bat"
+# Desktop shortcut
+Write-Step "Creating desktop shortcut..."
+$launcher  = Join-Path $PSScriptRoot "launch_gui.vbs"
 $shortcut  = Join-Path ([Environment]::GetFolderPath("Desktop")) "Arma Watcher.lnk"
 $wsh       = New-Object -ComObject WScript.Shell
 $lnk       = $wsh.CreateShortcut($shortcut)
-$lnk.TargetPath       = $runBat
+$lnk.TargetPath       = "wscript.exe"
+$lnk.Arguments        = "`"$launcher`""
 $lnk.WorkingDirectory = $PSScriptRoot
 $lnk.Description      = "Start Arma Watcher"
-$lnk.IconLocation     = (Join-Path $PSScriptRoot "arma_watcher\assets\icon.ico") + ",0"
+$iconPath = Join-Path $PSScriptRoot "arma_watcher\assets\icon.ico"
+if (Test-Path $iconPath) { $lnk.IconLocation = "$iconPath,0" }
 $lnk.Save()
+Write-OK "Shortcut created."
 
 Write-Host ""
 Write-Host "Setup complete!" -ForegroundColor Green
-Write-Host "    A shortcut 'Arma Watcher' has been placed on your Desktop." -ForegroundColor White
-Write-Host "    Just double-click it to start." -ForegroundColor White
+Write-Host "    Double-click 'Arma Watcher' on your Desktop to open the GUI." -ForegroundColor White
+Write-Host "    Configure your Discord webhook and model in the Settings panel," -ForegroundColor White
+Write-Host "    then click Start." -ForegroundColor White
 Write-Host ""
