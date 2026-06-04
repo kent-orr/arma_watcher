@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 arma-watcher = "arma_watcher.cli:main"
+arma-watcher-gui = "arma_watcher.gui:main"
 
 [tool.uv]
 package = true
