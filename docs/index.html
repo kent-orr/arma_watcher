@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arma Watcher — get pinged when your queue is up</title>
+<meta name="description" content="Watches your Arma Reforger screen with a local vision model and sends Discord notifications about your server queue position and ETA. No cloud, no API key.">
+<meta property="og:title" content="Arma Watcher">
+<meta property="og:description" content="Get a Discord ping when your Arma Reforger queue is almost up. Runs a local vision model — your screenshots never leave your machine.">
+<meta property="og:image" content="https://kent-orr.github.io/arma_watcher/screenshot.png">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👁️</text></svg>">
+<style>
+  :root {
+    --bg: #111111;
+    --surface: #1c1c1c;
+    --surf2: #262626;
+    --gold: #c8a84b;
+    --gold-dim: #7a6530;
+    --text: #c8c8c8;
+    --text-dim: #707070;
+    --border: #2c2c2c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--gold); }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+
+  header {
+    text-align: center;
+    padding: 72px 24px 40px;
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(800px 300px at 50% -10%, rgba(200,168,75,0.10), transparent 70%),
+      var(--bg);
+  }
+  .eyebrow {
+    letter-spacing: .28em;
+    text-transform: uppercase;
+    font-size: 12px;
+    color: var(--gold-dim);
+    margin-bottom: 18px;
+  }
+  h1 {
+    font-size: clamp(36px, 6vw, 58px);
+    font-weight: 800;
+    color: #f0f0f0;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+  }
+  h1 .gold { color: var(--gold); }
+  .tagline {
+    margin: 20px auto 0;
+    max-width: 620px;
+    font-size: clamp(16px, 2.4vw, 20px);
+    color: var(--text);
+  }
+  .sub { color: var(--text-dim); font-size: 15px; margin-top: 10px; }
+
+  .cta { margin-top: 36px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background: linear-gradient(180deg, var(--gold), var(--gold-dim));
+    color: #1a1400;
+    font-weight: 700;
+    font-size: 18px;
+    text-decoration: none;
+    padding: 16px 34px;
+    border-radius: 10px;
+    border: 1px solid #e3c468;
+    box-shadow: 0 8px 30px rgba(200,168,75,0.22);
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 12px 38px rgba(200,168,75,0.34); }
+  .btn svg { width: 22px; height: 22px; }
+  .meta { margin-top: 14px; font-size: 13px; color: var(--text-dim); }
+  .ghlink { color: var(--text-dim); text-decoration: none; border-bottom: 1px dotted var(--gold-dim); }
+
+  .shot {
+    margin: 56px auto;
+    max-width: 760px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+  }
+  .shot img { display: block; width: 100%; height: auto; }
+
+  section { padding: 8px 0 16px; }
+  h2 {
+    color: #e8e8e8;
+    font-size: 24px;
+    margin: 40px 0 18px;
+    font-weight: 700;
+  }
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 16px;
+    margin-top: 8px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .card h3 { color: var(--gold); font-size: 16px; margin-bottom: 6px; }
+  .card p { font-size: 14px; color: var(--text-dim); }
+
+  ol.steps { list-style: none; counter-reset: step; }
+  ol.steps li {
+    counter-increment: step;
+    position: relative;
+    padding: 14px 0 14px 52px;
+    border-bottom: 1px solid var(--border);
+  }
+  ol.steps li:last-child { border-bottom: 0; }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0; top: 12px;
+    width: 32px; height: 32px;
+    display: grid; place-items: center;
+    background: var(--surf2);
+    border: 1px solid var(--gold-dim);
+    color: var(--gold);
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  ol.steps b { color: var(--text); }
+
+  .req {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 22px;
+    font-size: 14px;
+    color: var(--text-dim);
+  }
+  .req b { color: var(--text); }
+
+  .note {
+    font-size: 13px;
+    color: var(--text-dim);
+    border-left: 2px solid var(--gold-dim);
+    padding-left: 14px;
+    margin-top: 18px;
+  }
+
+  footer {
+    text-align: center;
+    padding: 48px 24px 60px;
+    margin-top: 48px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  footer a { color: var(--text-dim); }
+</style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="eyebrow">Local vision model · Discord pings</div>
+      <h1>Alt-tab the <span class="gold">queue.</span><br>Get pinged when you're <span class="gold">in.</span></h1>
+      <p class="tagline">
+        Arma Watcher reads your Arma&nbsp;Reforger screen, tracks your spot in the
+        server queue, and sends Discord notifications with your position and ETA.
+      </p>
+      <p class="sub">No cloud, no account, no API key — screenshots are read by a model running on your own machine.</p>
+
+      <div class="cta">
+        <a class="btn" href="https://github.com/kent-orr/arma_watcher/releases/latest/download/ArmaWatcherSetup.exe">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4 6.3 11.7l1.4-1.4L11 13.6V3h1zM5 19h14v2H5z"/></svg>
+          Download for Windows
+        </a>
+        <p class="meta">
+          Free &amp; open source ·
+          <a class="ghlink" href="https://github.com/kent-orr/arma_watcher">View on GitHub</a> ·
+          <a class="ghlink" href="https://github.com/kent-orr/arma_watcher/releases">All releases</a>
+        </p>
+      </div>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="shot">
+      <img src="screenshot.png" alt="Arma Watcher app showing settings, live queue status and a log feed">
+    </div>
+
+    <section>
+      <h2>What it does</h2>
+      <div class="features">
+        <div class="card">
+          <h3>Reads your queue</h3>
+          <p>A local vision model (via Ollama) watches the screen and detects your position the moment you enter a server queue.</p>
+        </div>
+        <div class="card">
+          <h3>Pings you on Discord</h3>
+          <p>Milestone notifications — “30 to go”, “Almost there”, “You’re in!” — so your channel isn’t spammed every poll.</p>
+        </div>
+        <div class="card">
+          <h3>Live ETA</h3>
+          <p>Tracks how fast the line is moving and estimates how long until you’re in the game.</p>
+        </div>
+        <div class="card">
+          <h3>Stays private</h3>
+          <p>Screenshots never leave your PC. Everything runs locally — no API keys, no accounts, no cloud.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Install in three clicks</h2>
+      <ol class="steps">
+        <li><b>Download</b> the installer with the button above.</li>
+        <li><b>Run <code>ArmaWatcherSetup.exe</code></b>. It installs everything it needs — uv, Python, Ollama and the app — into its own folder. (Windows SmartScreen may warn on a new publisher; choose <i>More info → Run anyway</i>.)</li>
+        <li><b>Open “Arma Watcher”</b> from your Desktop or Start Menu, paste your Discord webhook, and click Start.</li>
+      </ol>
+      <p class="note">First start downloads the vision model (a few GB) — progress shows right in the app’s log. After that it’s instant.</p>
+    </section>
+
+    <section>
+      <h2>Requirements</h2>
+      <p class="req">
+        <b>Windows 10/11</b> &nbsp;·&nbsp;
+        A GPU with at least <b>1&nbsp;GB VRAM</b> (6.6&nbsp;GB recommended for the default model) &nbsp;·&nbsp;
+        Arma&nbsp;Reforger on any connected monitor &nbsp;·&nbsp;
+        <i>(optional)</i> a Discord webhook URL for notifications.
+      </p>
+    </section>
+  </div>
+
+  <footer>
+    <p>
+      <a href="https://github.com/kent-orr/arma_watcher">GitHub</a> ·
+      <a href="https://github.com/kent-orr/arma_watcher/blob/main/LICENSE">MIT License</a> · © Kent Orr
+    </p>
+    <p style="margin-top:10px; max-width:560px; margin-left:auto; margin-right:auto;">
+      Not affiliated with or endorsed by Bohemia Interactive.
+      “Arma Reforger” is a trademark of its respective owner.
+    </p>
+  </footer>
+</body>
+</html>

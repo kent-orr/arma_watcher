@@ -1,6 +1,12 @@
 # Arma Watcher
 
-Monitors your Arma Reforger screen, detects when you enter a server queue, and sends Discord notifications with your position and estimated wait time. Uses a local vision model via Ollama — no cloud API required.
+Watches your Arma Reforger screen, detects when you enter a server queue, and sends Discord notifications with your position and estimated wait time — so you can alt-tab away and get pinged when you're about to be in.
+
+It reads the screen with a **local vision model via [Ollama](https://ollama.com)**. No cloud API, no account, no API key. Your screenshots never leave your machine — they're only handed to Ollama running locally.
+
+> _Not affiliated with or endorsed by Bohemia Interactive. "Arma Reforger" is a trademark of its respective owner._
+
+![Arma Watcher](docs/screenshot.png)
 
 ---
 
@@ -13,131 +19,52 @@ Monitors your Arma Reforger screen, detects when you enter a server queue, and s
 
 ---
 
-## Installation
+## Install
 
-Double-click **`install.bat`** in the repo root (or right-click → *Run as administrator* if you hit permission errors).
+### Easiest — one-click installer
 
-The installer runs through these steps automatically:
+1. Go to the [**download page**](https://kent-orr.github.io/arma_watcher/) (or grab `ArmaWatcherSetup.exe` from the [latest release](https://github.com/kent-orr/arma_watcher/releases/latest)).
+2. Run **`ArmaWatcherSetup.exe`** and follow the prompts. Windows SmartScreen may warn on a new publisher — choose *More info → Run anyway*.
 
-### 1 — uv (Python package manager)
+The installer copies the app, installs everything it needs (uv, Python, Ollama, dependencies), and creates Desktop + Start Menu shortcuts. No command line, no admin required.
 
-`uv` is used to manage Python and the project's dependencies. If it isn't already installed, the script downloads and installs it from [astral.sh](https://astral.sh/uv/).
+### Manual — from source
 
-### 2 — Python
+1. Download this repository (green **Code → Download ZIP** button, then unzip) or `git clone` it.
+2. Double-click **`install.bat`** in the folder (right-click → *Run as administrator* if you hit permission errors).
 
-`uv` ensures the correct Python version is available. Nothing to do here.
+The installer automatically:
 
-### 3 — Ollama
+| Step | What it does |
+|---|---|
+| **uv** | Installs [uv](https://astral.sh/uv/), the Python package manager, if missing. |
+| **Python** | uv fetches the correct Python version for you. |
+| **Ollama** | Installs [Ollama](https://ollama.com) if missing — it runs the local vision model. |
+| **Dependencies** | `uv sync` installs the Python packages into an isolated environment inside the folder. |
+| **Desktop shortcut** | Creates an **Arma Watcher** shortcut that opens the app. |
 
-Ollama runs the local vision model. If it isn't already installed, the script downloads and runs the official installer from [ollama.com](https://ollama.com).
-
-### 4 — Python dependencies
-
-`uv sync` installs all Python packages into an isolated virtual environment inside the repo.
-
-### 5 — First-time setup wizard
-
-An interactive prompt collects your preferences and saves them to `C:\Users\<you>\.arma_watcher\config.json`.
-
----
-
-## Setup Wizard — step by step
-
-```
-=== Arma Watcher — First-time Setup ===
-Press Enter to accept the default for each option.
-```
-
-#### Model selection
-
-```
-  Select a model:
-
-    1) qwen3.5:0.8b     1.0 GB VRAM
-    2) qwen3.5:2b       2.7 GB VRAM
-    3) qwen3.5:4b       3.4 GB VRAM
-    4) qwen3.5:9b       6.6 GB VRAM  (recommended)
-
-  Enter 1-4 [4]:
-```
-
-Pick the largest model your GPU can fit. The default (`4`, qwen3.5:9b) gives the best accuracy. On lower-VRAM cards choose `1` or `2`.
-
-#### Pull the model
-
-```
-  Pull qwen3.5:9b now? This may take a while [Y/n]:
-```
-
-Press **Enter** (or type `Y`) to download the model immediately — this can be several gigabytes. Type `n` to skip and pull it manually later:
-
-```
-ollama pull qwen3.5:9b
-```
-
-The watcher will not start until Ollama is running and the model has been pulled. If you skipped the pull, do it before launching.
-
-#### Discord webhook URL
-
-```
-Discord webhook URL [none]:
-```
-
-Paste a Discord incoming webhook URL to receive queue position updates in a channel. Leave blank to disable notifications.
-
-To create one: *Discord channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL*.
-
-#### Discord user ID *(optional)*
-
-```
-Discord user ID for @mentions (optional — enable Developer Mode, right-click your name, Copy User ID) [none]:
-```
-
-Paste your numeric Discord user ID to be @mentioned directly in queue notifications. Leave blank to send notifications without a ping.
-
-To find your ID: *Discord Settings → Advanced → enable Developer Mode*, then right-click your username anywhere and select **Copy User ID**.
-
-#### Monitor index
-
-```
-Monitor index (leave blank to auto-detect) [none]:
-```
-
-Leave blank and the watcher will scan all monitors to find Arma Reforger automatically. Enter a number (e.g. `0`, `1`, `2`) to pin it to a specific display.
-
-#### Poll intervals
-
-```
-Queue poll interval in seconds [20]:
-Detection retry interval in seconds [5]:
-```
-
-- **Queue poll interval** — how often (in seconds) the watcher checks your position once you are in a queue. Default: 20.
-- **Detection retry interval** — how often (in seconds) the watcher looks for Arma / a queue screen before one is found. Default: 5.
-
-Press **Enter** to accept both defaults.
+That's it — no command line needed.
 
 ---
 
-After the wizard completes, a **desktop shortcut** named *Arma Watcher* is created. Double-click it any time to start monitoring.
+## Use
 
----
+Double-click the **Arma Watcher** desktop shortcut. The app opens with three panels:
 
-## Running
+**1. Settings** — fill these in once and click **Save Settings**:
 
-Double-click the **Arma Watcher** desktop shortcut, or run from the repo root:
+| Field | Notes |
+|---|---|
+| Discord Webhook | *(optional)* Channel → Settings → Integrations → Webhooks → New Webhook → Copy URL. Leave blank to disable notifications. |
+| Discord User ID | *(optional)* Enable Developer Mode, right-click your name → Copy User ID. Used to `@mention` you. |
+| Model | Pick the largest that fits your GPU (see VRAM table below). Default `qwen3.5:9b`. |
+| Monitor | `Auto` scans all monitors for Arma. Or pin a specific display number. |
+| Queue Interval (s) | How often to re-check your position once queued. Default 20. |
+| Detect Interval (s) | How often to look for Arma / a queue before one is found. Default 5. |
 
-```bat
-run.bat
-```
+**2. Status** — click **Start Watching**. The first time you start, if the selected model isn't downloaded yet the app pulls it automatically (several GB — this can take a few minutes; progress shows in the log). After that, it watches for the queue and shows your live position and ETA.
 
-Or directly via uv:
-
-```bat
-uv run arma-watcher
-```
-
-### What you'll see
+**3. Log** — a running feed of what the watcher sees:
 
 ```
 [21:45:46] Discord webhook OK.
@@ -146,11 +73,20 @@ uv run arma-watcher
 [21:47:21] Position: 43 | My Server | Rate: 4.0/min | ETA: ~11min
 ```
 
-Once you enter the game the watcher unloads the model from VRAM and sends a final Discord notification.
+When you enter the game the model is unloaded from VRAM and a final notification is sent.
+
+### Model sizes
+
+| Model | VRAM |
+|---|---|
+| `qwen3.5:0.8b` | 1.0 GB |
+| `qwen3.5:2b` | 2.7 GB |
+| `qwen3.5:4b` | 3.4 GB |
+| `qwen3.5:9b` | 6.6 GB *(recommended)* |
 
 ### Discord notifications
 
-Instead of sending a message on every queue poll, the watcher sends a small set of milestone pings so your channel doesn't get spammed:
+Rather than pinging on every poll, the watcher sends a few milestone messages so your channel isn't spammed:
 
 | Event | Message |
 |---|---|
@@ -163,50 +99,30 @@ Instead of sending a message on every queue poll, the watcher sends a small set 
 | Position ≤ 1 | `Next up! \| ...` |
 | In game | `@you You're in! Get on the server.` |
 
-Milestones that the queue starts below are skipped (e.g. if you join at position 8, the 30 and 20 messages are never sent). The `@you` ping is only included if a Discord user ID is configured.
-
-Press **Ctrl+C** at any time to stop. The model is unloaded from VRAM automatically on exit.
+Milestones the queue starts below are skipped (join at position 8 → the 30 and 20 messages never send). The `@you` ping is only included if a Discord user ID is configured.
 
 ### Ollama not running?
 
-If Ollama isn't started when the watcher launches, it waits and retries automatically:
-
-```
-[21:38:59] Ollama is not running. Start Ollama and this watcher will resume automatically. Retrying in 15s...
-```
-
-Start Ollama and the watcher will continue without needing a restart.
+If Ollama isn't started when you click Start, the watcher waits and retries automatically — start Ollama and it resumes without a restart.
 
 ---
 
 ## Updating
 
-To pull the latest version without needing git, double-click **`update.bat`** in the repo root.
-
-It will:
-1. Download the latest `main` branch zip from GitHub
-2. Replace the `arma_watcher/` package files and scripts
-3. Run `uv sync` to update dependencies
-
-Your config (`C:\Users\<you>\.arma_watcher\config.json`) is never touched.
+Double-click **`update.bat`** to pull the latest version from GitHub. It replaces the app files and re-syncs dependencies. Your config (`C:\Users\<you>\.arma_watcher\config.json`) is never touched.
 
 ---
 
-## Re-running setup
+## Advanced — command line
 
-To change any setting (model, Discord URL, monitor, intervals):
+The app also runs headless. From the project folder:
 
 ```bat
-uv run arma-watcher --setup
+uv run arma-watcher            # run with saved config
+uv run arma-watcher --setup    # re-run the interactive setup wizard
 ```
 
-Config is stored at `C:\Users\<you>\.arma_watcher\config.json`.
-
----
-
-## Command-line overrides
-
-Any config value can be overridden at launch without re-running setup:
+Any saved setting can be overridden at launch:
 
 | Flag | Description |
 |---|---|
@@ -215,3 +131,11 @@ Any config value can be overridden at launch without re-running setup:
 | `--detect-interval N` | Detection retry interval in seconds |
 | `--discord-webhook URL` | Discord webhook URL |
 | `--setup` | Re-run the setup wizard |
+
+Config lives at `C:\Users\<you>\.arma_watcher\config.json`.
+
+---
+
+## License
+
+[MIT](LICENSE) © Kent Orr

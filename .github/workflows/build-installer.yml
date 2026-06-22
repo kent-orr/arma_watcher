@@ -1,0 +1,52 @@
+name: Build installer
+
+# Builds ArmaWatcherSetup.exe and attaches it to a GitHub Release.
+# Push a tag like v0.1.0 to cut a release, or run manually to just build the .exe.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version
+        id: version
+        shell: bash
+        run: |
+          ref="${GITHUB_REF#refs/tags/v}"
+          if [ "$ref" = "$GITHUB_REF" ]; then
+            ref="0.0.0-dev"   # manual run, not a tag
+          fi
+          echo "version=$ref" >> "$GITHUB_OUTPUT"
+          echo "Building version $ref"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DMyAppVersion=${{ steps.version.outputs.version }}" `
+            "installer\arma_watcher.iss"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArmaWatcherSetup
+          path: dist/ArmaWatcherSetup.exe
+
+      - name: Publish to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ArmaWatcherSetup.exe
+          generate_release_notes: true
