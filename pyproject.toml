@@ -1,9 +1,11 @@
 [project]
 name = "arma-watcher"
 version = "0.1.0"
-description = "Add your description here"
+description = "Watches your Arma Reforger screen with a local vision model and sends Discord notifications about your server queue position and ETA."
 readme = "README.md"
-requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
 dependencies = [
     "mss>=10.2.0",
     "ollama>=0.6.1",

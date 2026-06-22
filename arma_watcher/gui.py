@@ -29,7 +29,7 @@ LOG_POS  = "#66ff66"
 LOG_OK   = "#88ff88"
 
 _MODELS = ["qwen3.5:0.8b", "qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b"]
-_FONT_PATH = r"C:\Users\orrke\Downloads\kent_handwriting.ttf"
+_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "kent_handwriting.ttf")
 
 
 def _read_ttf_family(path: str) -> str | None:

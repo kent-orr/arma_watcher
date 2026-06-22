@@ -12,7 +12,7 @@ _T = TypeVar("_T")
 
 import ollama
 
-from arma_watcher.inference import Inference, MODEL, ScreenState
+from arma_watcher.inference import Inference, MODEL, ScreenState, ensure_model
 from arma_watcher.screenshot import capture_to_bytes, list_monitors
 
 
@@ -114,6 +114,7 @@ class ArmaWatcher:
             else:
                 self._log("Discord webhook FAILED — check URL in config.")
         try:
+            self._ollama_call(lambda: ensure_model(self.model, self._log))
             while self.state != WatcherState.IN_GAME and not self._stop.is_set():
                 if self.state == WatcherState.SEARCHING_ARMA:
                     self._step_searching_arma()

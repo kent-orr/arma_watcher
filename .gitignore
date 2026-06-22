@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# pytest
+.pytest_cache/
+.env

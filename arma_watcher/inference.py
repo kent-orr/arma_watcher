@@ -1,9 +1,39 @@
 import re
+from collections.abc import Callable
 
+import ollama
 from ollama import chat, generate
 from pydantic import BaseModel
 
 MODEL = "qwen3.5:9b"
+
+
+def _installed_models() -> set[str]:
+    """Return the set of model tags Ollama currently has pulled locally."""
+    names: set[str] = set()
+    for m in getattr(ollama.list(), "models", None) or []:
+        name = getattr(m, "model", None) or getattr(m, "name", None)
+        if name:
+            names.add(name)
+    return names
+
+
+def ensure_model(model: str, log: Callable[[str], None]) -> None:
+    """Make sure `model` is pulled locally, downloading it (with progress) if not.
+
+    Raises ConnectionError / ollama.ResponseError if Ollama is unreachable so the
+    caller's retry logic can handle a not-yet-started Ollama.
+    """
+    if model in _installed_models():
+        return
+    log(f"Model {model} is not installed yet. Downloading now — this can take several minutes...")
+    last_status = ""
+    for prog in ollama.pull(model, stream=True):
+        status = getattr(prog, "status", "") if not isinstance(prog, dict) else prog.get("status", "")
+        if status and status != last_status:
+            log(f"  {status}")
+            last_status = status
+    log(f"Model {model} ready.")
 
 QUEUE_PROMPT = (
     "This is a screenshot from an Arma Reforger server browser queue. "
