@@ -542,15 +542,20 @@ class WatcherGUI:
 
 
 def main() -> None:
-    # Tell Windows this is its own app, not python.exe — fixes taskbar icon
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ArmaWatcher.App.1")
+    # Tell Windows this is its own app, not python.exe — fixes taskbar icon.
+    # ctypes.windll only exists on Windows; this is a no-op elsewhere.
+    if os.name == "nt":
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ArmaWatcher.App.1")
 
     root = tk.Tk()
     root.minsize(500, 580)
 
     _icon = os.path.join(os.path.dirname(__file__), "assets", "icon.ico")
     if os.path.isfile(_icon):
-        root.iconbitmap(_icon)
+        try:
+            root.iconbitmap(_icon)
+        except tk.TclError:
+            pass  # .ico via iconbitmap is Windows-only; skip on other platforms
 
     WatcherGUI(root)
     root.mainloop()

@@ -1,4 +1,6 @@
-Set-Location $PSScriptRoot
+# This script lives in launchers/; update the repo root one level up.
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $RepoRoot
 
 $repo    = "https://github.com/kent-orr/arma_watcher/archive/refs/heads/main.zip"
 $zipFile = Join-Path $env:TEMP "arma_watcher_update.zip"
@@ -22,12 +24,10 @@ Expand-Archive -Path $zipFile -DestinationPath $extract -Force
 $src = Join-Path $extract "arma_watcher-main"
 
 Write-Host "Copying updated files..."
-Copy-Item (Join-Path $src "arma_watcher") -Destination $PSScriptRoot -Recurse -Force
-Copy-Item (Join-Path $src "pyproject.toml") -Destination $PSScriptRoot -Force
-Copy-Item (Join-Path $src "run.ps1")        -Destination $PSScriptRoot -Force
-Copy-Item (Join-Path $src "run.bat")        -Destination $PSScriptRoot -Force
-Copy-Item (Join-Path $src "update.ps1")     -Destination $PSScriptRoot -Force
-Copy-Item (Join-Path $src "update.bat")     -Destination $PSScriptRoot -Force
+Copy-Item (Join-Path $src "arma_watcher")    -Destination $RepoRoot -Recurse -Force
+Copy-Item (Join-Path $src "pyproject.toml")  -Destination $RepoRoot -Force
+# All launchers live under launchers/; refresh the whole folder in place.
+Copy-Item (Join-Path $src "launchers\*")     -Destination $PSScriptRoot -Recurse -Force
 
 Write-Host "Syncing dependencies..."
 uv sync

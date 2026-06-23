@@ -1,7 +1,11 @@
 # Arma Watcher - Windows Setup
-# Run from the repo root: .\install.bat
+# Run from anywhere: .\launchers\install.bat
 
 $ErrorActionPreference = "Stop"
+
+# This script lives in launchers/; uv must run from the repo root one level up.
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $RepoRoot
 
 function Write-Step { param($msg) Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-OK   { param($msg) Write-Host "    OK  $msg" -ForegroundColor Green }
@@ -60,9 +64,9 @@ $wsh       = New-Object -ComObject WScript.Shell
 $lnk       = $wsh.CreateShortcut($shortcut)
 $lnk.TargetPath       = "wscript.exe"
 $lnk.Arguments        = "`"$launcher`""
-$lnk.WorkingDirectory = $PSScriptRoot
+$lnk.WorkingDirectory = $RepoRoot
 $lnk.Description      = "Start Arma Watcher"
-$iconPath = Join-Path $PSScriptRoot "arma_watcher\assets\icon.ico"
+$iconPath = Join-Path $RepoRoot "arma_watcher\assets\icon.ico"
 if (Test-Path $iconPath) { $lnk.IconLocation = "$iconPath,0" }
 $lnk.Save()
 Write-OK "Shortcut created."

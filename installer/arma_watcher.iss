@@ -3,13 +3,13 @@
 ; CI can override the version: ISCC.exe /DMyAppVersion=1.2.3 installer\arma_watcher.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.3"
+  #define MyAppVersion "0.1.4"
 #endif
 
 #define MyAppName "Arma Watcher"
 #define MyAppPublisher "Kent Orr"
 #define MyAppURL "https://github.com/kent-orr/arma_watcher"
-#define MyAppExeName "launch_gui.vbs"
+#define MyAppExeName "launchers\launch_gui.vbs"
 #define SrcRoot ".."
 
 [Setup]
@@ -55,22 +55,24 @@ Source: "{#SrcRoot}\uv.lock";          DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\.python-version";  DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\README.md";        DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\LICENSE";          DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\launch_gui.vbs";   DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\run.ps1";          DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\run.bat";          DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\update.ps1";       DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\update.bat";       DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\install.ps1";      DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcRoot}\install.bat";      DestDir: "{app}"; Flags: ignoreversion
+; Launchers live under launchers/ in the repo; install them to {app}\launchers so
+; the layout matches and each script's "go to repo root" logic stays correct.
+Source: "{#SrcRoot}\launchers\launch_gui.vbs"; DestDir: "{app}\launchers"; Flags: ignoreversion
+Source: "{#SrcRoot}\launchers\run.ps1";        DestDir: "{app}\launchers"; Flags: ignoreversion
+Source: "{#SrcRoot}\launchers\run.bat";        DestDir: "{app}\launchers"; Flags: ignoreversion
+Source: "{#SrcRoot}\launchers\update.ps1";     DestDir: "{app}\launchers"; Flags: ignoreversion
+Source: "{#SrcRoot}\launchers\update.bat";     DestDir: "{app}\launchers"; Flags: ignoreversion
+Source: "{#SrcRoot}\launchers\install.ps1";    DestDir: "{app}\launchers"; Flags: ignoreversion
+Source: "{#SrcRoot}\launchers\install.bat";    DestDir: "{app}\launchers"; Flags: ignoreversion
 ; Post-install bootstrap (uv + Ollama + uv sync)
 Source: "{#SrcRoot}\installer\bootstrap.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 
 [Icons]
 ; Launch via wscript.exe so no console window flashes (launch_gui.vbs runs the GUI hidden).
-Name: "{group}\Arma Watcher"; Filename: "{win}\System32\wscript.exe"; Parameters: """{app}\launch_gui.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\arma_watcher\assets\icon.ico"; Comment: "Start Arma Watcher"
-Name: "{group}\Update Arma Watcher"; Filename: "{app}\update.bat"; WorkingDir: "{app}"; IconFilename: "{app}\arma_watcher\assets\icon.ico"; Comment: "Update Arma Watcher to the latest version"
+Name: "{group}\Arma Watcher"; Filename: "{win}\System32\wscript.exe"; Parameters: """{app}\launchers\launch_gui.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\arma_watcher\assets\icon.ico"; Comment: "Start Arma Watcher"
+Name: "{group}\Update Arma Watcher"; Filename: "{app}\launchers\update.bat"; WorkingDir: "{app}"; IconFilename: "{app}\arma_watcher\assets\icon.ico"; Comment: "Update Arma Watcher to the latest version"
 Name: "{group}\Uninstall Arma Watcher"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Arma Watcher"; Filename: "{win}\System32\wscript.exe"; Parameters: """{app}\launch_gui.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\arma_watcher\assets\icon.ico"; Comment: "Start Arma Watcher"; Tasks: desktopicon
+Name: "{autodesktop}\Arma Watcher"; Filename: "{win}\System32\wscript.exe"; Parameters: """{app}\launchers\launch_gui.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\arma_watcher\assets\icon.ico"; Comment: "Start Arma Watcher"; Tasks: desktopicon
 
 ; Note: the heavy lifting (uv, Ollama, Python deps, model pull) is run from the
 ; [Code] section below on a custom wizard page, with a hidden PowerShell process
@@ -210,7 +212,7 @@ begin
   begin
     LogMemo.Lines.Add('');
     LogMemo.Lines.Add('Setup hit a problem. You can close this and re-run the installer,');
-    LogMemo.Lines.Add('or open the install folder and run install.bat manually.');
+    LogMemo.Lines.Add('or open the install folder and run launchers\install.bat manually.');
     SendMessage(LogMemo.Handle, EM_SCROLLCARET, 0, 0);
   end;
 

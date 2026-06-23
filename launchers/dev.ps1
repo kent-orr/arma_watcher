@@ -5,13 +5,13 @@
 # The default email matches arma_watcher_server's scripts/dev.ps1 seed, so the
 # two repos line up out of the box. Start the server side first.
 #
-#   .\dev.ps1
-#   .\dev.ps1 -ProxyUrl http://localhost:5000 -Email me@example.com
+#   .\launchers\dev.ps1
+#   .\launchers\dev.ps1 -ProxyUrl http://localhost:5000 -Email me@example.com
 param(
     [string]$ProxyUrl = "http://localhost:5000",
     [string]$Email = "dev@armawatcher.local"
 )
-Set-Location $PSScriptRoot
+Set-Location (Split-Path -Parent $PSScriptRoot)
 $env:ARMA_WATCHER_INFERENCE_MODE = "cloud"
 $env:ARMA_WATCHER_PROXY_URL = $ProxyUrl
 $env:ARMA_WATCHER_SUBSCRIPTION_EMAIL = $Email

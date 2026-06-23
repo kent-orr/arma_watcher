@@ -12,10 +12,16 @@ It reads the screen with a **local vision model via [Ollama](https://ollama.com)
 
 ## Requirements
 
-- Windows 10/11
+- Windows 10/11, or Linux / macOS (run from source — see *Manual* below)
 - A GPU with at least **1 GB VRAM** (6.6 GB recommended for the default model)
 - Arma Reforger running on any connected monitor
 - *(Optional)* A Discord webhook URL for notifications
+
+> **Heads up — VRAM is freed once you're in the game.** As soon as the watcher
+> determines you've made it into the match, it kills the Ollama process to free up
+> your VRAM for Arma. LLMs are non-deterministic, though, so on rare occasions this
+> detection can miss and Ollama may keep running — if you notice stuttering, just
+> tell the watcher to stop watching.
 
 ---
 
@@ -31,7 +37,7 @@ The installer copies the app, installs everything it needs (uv, Python, Ollama, 
 ### Manual — from source
 
 1. Download this repository (green **Code → Download ZIP** button, then unzip) or `git clone` it.
-2. Double-click **`install.bat`** in the folder (right-click → *Run as administrator* if you hit permission errors).
+2. Open the **`launchers`** folder and double-click **`install.bat`** (right-click → *Run as administrator* if you hit permission errors).
 
 The installer automatically:
 
@@ -44,6 +50,20 @@ The installer automatically:
 | **Desktop shortcut** | Creates an **Arma Watcher** shortcut that opens the app. |
 
 That's it — no command line needed.
+
+### Linux / macOS — from source
+
+```bash
+git clone https://github.com/kent-orr/arma_watcher.git
+cd arma_watcher
+./launchers/install.sh   # installs uv, Python, Ollama, deps + a desktop entry
+./launchers/run.sh       # launch the GUI (or run it from your applications menu)
+```
+
+`launchers/install.sh` does the same steps as the Windows installer and adds an **Arma
+Watcher** entry to your applications menu. uv's bundled Python ships its own
+Tk, so you usually don't need a system `python3-tk`; under Wayland, screen
+capture goes through XWayland. Ollama install is optional if you use cloud mode.
 
 ---
 
@@ -109,15 +129,19 @@ If Ollama isn't started when you click Start, the watcher waits and retries auto
 
 ## Updating
 
-Double-click **`update.bat`** to pull the latest version from GitHub. It replaces the app files and re-syncs dependencies. Your config (`C:\Users\<you>\.arma_watcher\config.json`) is never touched.
+On **Windows**, double-click **`launchers\update.bat`** to pull the latest version from GitHub.
+On **Linux/macOS**, launch the headless CLI (`./launchers/run.sh` runs the GUI, which skips the
+check — use `uv run arma-watcher`): it checks GitHub on startup and prompts to update.
+Either way it replaces the app files and re-syncs dependencies. Your config
+(`~/.arma_watcher/config.json`) is never touched.
 
 ---
 
 ## Advanced — command line
 
-The app also runs headless. From the project folder:
+The app also runs headless. From the project folder (same on Windows, Linux, macOS):
 
-```bat
+```sh
 uv run arma-watcher            # run with saved config
 uv run arma-watcher --setup    # re-run the interactive setup wizard
 ```
@@ -132,7 +156,7 @@ Any saved setting can be overridden at launch:
 | `--discord-webhook URL` | Discord webhook URL |
 | `--setup` | Re-run the setup wizard |
 
-Config lives at `C:\Users\<you>\.arma_watcher\config.json`.
+Config lives at `~/.arma_watcher/config.json` (on Windows, `C:\Users\<you>\.arma_watcher\config.json`).
 
 ### Dev: run against a local inference proxy
 
@@ -140,7 +164,7 @@ To integration-test against a locally running
 [`arma_watcher_server`](../arma_watcher_server) instead of the saved config:
 
 ```powershell
-.\dev.ps1   # cloud mode → http://localhost:5000 as dev@armawatcher.local
+.\launchers\dev.ps1   # cloud mode → http://localhost:5000 as dev@armawatcher.local
 ```
 
 It sets `ARMA_WATCHER_INFERENCE_MODE` / `ARMA_WATCHER_PROXY_URL` /

@@ -14,4 +14,24 @@ wheels/
 
 # pytest
 .pytest_cache/
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+.uv/
+
+# Secrets / local env (never commit)
 .env
+.env.*
+!.env.example
+
+# App runtime / build artifacts
+*.spec
+installer/Output/
+*.log
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

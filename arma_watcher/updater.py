@@ -13,7 +13,9 @@ _API_URL = f"https://api.github.com/repos/{_REPO}/commits/{_BRANCH}"
 _ZIP_URL = f"https://github.com/{_REPO}/archive/refs/heads/{_BRANCH}.zip"
 _INSTALL_DIR = Path(__file__).parent.parent.resolve()
 _SHA_FILE = Path.home() / ".arma_watcher" / "installed_sha"
-_UPDATE_FILES = ["arma_watcher", "pyproject.toml", "run.ps1", "run.bat", "update.ps1", "update.bat"]
+# "launchers" is a directory: every .ps1/.bat/.vbs/.sh launcher lives there, so
+# copytree refreshes them all at once (no need to enumerate each new launcher).
+_UPDATE_FILES = ["arma_watcher", "pyproject.toml", "launchers"]
 
 
 def _remote_sha() -> str | None:
