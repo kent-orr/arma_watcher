@@ -1,6 +1,6 @@
 [project]
 name = "arma-watcher"
-version = "0.1.1"
+version = "0.1.2"
 description = "Watches your Arma Reforger screen with a local vision model and sends Discord notifications about your server queue position and ETA."
 readme = "README.md"
 license = "MIT"
@@ -19,6 +19,11 @@ arma-watcher-gui = "arma_watcher.gui:main"
 
 [tool.uv]
 package = true
+
+# Pin the importable package so setuptools' flat-layout auto-discovery doesn't
+# choke on sibling top-level dirs (e.g. installer/).
+[tool.setuptools]
+packages = ["arma_watcher"]
 
 [dependency-groups]
 dev = [

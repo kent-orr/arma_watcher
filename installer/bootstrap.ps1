@@ -11,7 +11,11 @@ param(
     [string]$LogFile = ""
 )
 
-$ErrorActionPreference = "Stop"
+# IMPORTANT: keep this "Continue", not "Stop". Native tools (uv, ollama) print
+# normal progress and warnings to stderr; under "Stop" PowerShell 5.1 wraps the
+# first stderr line in a terminating error and aborts. We gate on $LASTEXITCODE
+# instead, and `throw` explicitly when a step genuinely fails.
+$ErrorActionPreference = "Continue"
 
 # Append a line to both stdout and the shared log file the installer tails.
 # Retries briefly because the installer holds a (read) handle on the log every
@@ -29,6 +33,14 @@ function Log {
 function Step { param($m) Log ""; Log ("==> " + $m) }
 function OK   { param($m) Log ("    OK  " + $m) }
 function Warn { param($m) Log ("    >>  " + $m) }
+
+# Run a native command, stream its output (stdout + stderr) into the log, and
+# return its exit code. Safe under $ErrorActionPreference = "Continue".
+function Invoke-Logged {
+    param([string]$Exe, [string[]]$Args)
+    & $Exe @Args 2>&1 | ForEach-Object { Log ([string]$_) }
+    return $LASTEXITCODE
+}
 
 function Refresh-Path {
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
@@ -68,7 +80,8 @@ try {
         OK "uv already installed."
     } else {
         Warn "uv not found - installing from astral.sh..."
-        irm https://astral.sh/uv/install.ps1 | iex
+        try { irm https://astral.sh/uv/install.ps1 | iex }
+        catch { throw "uv install failed: $($_.Exception.Message)" }
         Refresh-Path
         if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
             throw "uv install failed. See https://docs.astral.sh/uv/"
@@ -77,8 +90,11 @@ try {
     }
 
     # Python (managed by uv, pinned to .python-version) ----------------------
+    # uv can emit a non-fatal "Failed to install executable" warning while still
+    # providing a usable managed Python, so we don't treat this step as fatal -
+    # `uv sync` below is the real gate.
     Step "Installing Python..."
-    uv python install *> $null
+    $null = Invoke-Logged "uv" @("python", "install")
     OK "Python ready."
 
     # Ollama -----------------------------------------------------------------
@@ -87,7 +103,8 @@ try {
         OK "Ollama already installed."
     } else {
         Warn "Ollama not found - installing from ollama.com..."
-        irm https://ollama.com/install.ps1 | iex
+        try { irm https://ollama.com/install.ps1 | iex }
+        catch { throw "Ollama install failed: $($_.Exception.Message)" }
         Refresh-Path
         if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
             throw "Ollama install failed. See https://ollama.com"
@@ -97,8 +114,8 @@ try {
 
     # Python dependencies ----------------------------------------------------
     Step "Installing Python dependencies (this can take a few minutes)..."
-    uv sync 2>&1 | ForEach-Object { Log ([string]$_) }
-    if ($LASTEXITCODE -ne 0) { throw "uv sync failed." }
+    $code = Invoke-Logged "uv" @("sync")
+    if ($code -ne 0) { throw "uv sync failed (exit $code)." }
     OK "Dependencies installed."
 
     # Model ------------------------------------------------------------------
@@ -108,8 +125,8 @@ try {
         OK "Saved to config."
 
         Step ("Downloading model " + $Model + " (this can be several GB - please wait)...")
-        ollama pull $Model 2>&1 | ForEach-Object { Log ([string]$_) }
-        if ($LASTEXITCODE -ne 0) {
+        $code = Invoke-Logged "ollama" @("pull", $Model)
+        if ($code -ne 0) {
             Warn "Model download did not finish. Arma Watcher will pull it on first launch."
         } else {
             OK ("Model " + $Model + " ready.")
