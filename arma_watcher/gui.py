@@ -1,9 +1,13 @@
 import ctypes
+import json
 import os
 import queue
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
+import urllib.error
+import urllib.request
+import webbrowser
 from tkinter import ttk
 
 from arma_watcher import config as cfg_mod
@@ -29,6 +33,9 @@ LOG_POS  = "#66ff66"
 LOG_OK   = "#88ff88"
 
 _MODELS = ["qwen3.5:0.8b", "qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b"]
+_MODE_LOCAL = "Local (own VRAM)"
+_MODE_CLOUD = "Cloud (subscription)"
+_MODES = [_MODE_LOCAL, _MODE_CLOUD]
 _FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "kent_handwriting.ttf")
 
 
@@ -237,21 +244,25 @@ class WatcherGUI:
         self._section_header(sb, "Settings")
 
         self._sv: dict[str, tk.StringVar] = {}
+        self._field_widgets: dict[str, tuple[tk.Widget, tk.Widget]] = {}
         grid = tk.Frame(sb, bg=SURFACE)
         grid.pack(fill="x")
 
         fields = [
-            ("discord_webhook",  "Discord Webhook",     "entry",   {}),
-            ("discord_user_id",  "Discord User ID",     "entry",   {}),
-            ("model",            "Model",               "combo",   {"values": _MODELS, "state": "readonly", "width": 18}),
-            ("monitor",          "Monitor",             "combo",   {"values": ["Auto", "1", "2", "3", "4", "5"], "width": 8}),
-            ("interval",         "Queue Interval (s)",  "spinbox", {"from_": 5, "to": 300, "width": 8}),
-            ("detect_interval",  "Detect Interval (s)", "spinbox", {"from_": 1, "to": 60,  "width": 8}),
+            ("inference_mode",     "Inference",          "combo",   {"values": _MODES, "state": "readonly", "width": 20}),
+            ("discord_webhook",    "Discord Webhook",    "entry",   {}),
+            ("discord_user_id",    "Discord User ID",    "entry",   {}),
+            ("model",              "Model",              "combo",   {"values": _MODELS, "state": "readonly", "width": 18}),
+            ("proxy_url",          "Service URL",        "entry",   {}),
+            ("subscription_email", "Subscription Email", "entry",   {}),
+            ("monitor",            "Monitor",            "combo",   {"values": ["Auto", "1", "2", "3", "4", "5"], "width": 8}),
+            ("interval",           "Queue Interval (s)", "spinbox", {"from_": 5, "to": 300, "width": 8}),
+            ("detect_interval",    "Detect Interval (s)","spinbox", {"from_": 1, "to": 60,  "width": 8}),
         ]
         for row_i, (key, label, kind, kw) in enumerate(fields):
-            tk.Label(grid, text=label, bg=SURFACE, fg=TEXT_DIM,
-                     font=("Segoe UI", 9)).grid(row=row_i, column=0, sticky="w",
-                                                pady=3, padx=(0, 12))
+            lbl = tk.Label(grid, text=label, bg=SURFACE, fg=TEXT_DIM,
+                           font=("Segoe UI", 9))
+            lbl.grid(row=row_i, column=0, sticky="w", pady=3, padx=(0, 12))
             sv = tk.StringVar()
             self._sv[key] = sv
             if kind == "entry":
@@ -261,11 +272,17 @@ class WatcherGUI:
             else:
                 w = ttk.Spinbox(grid, textvariable=sv, **kw)
             w.grid(row=row_i, column=1, sticky="w", pady=3)
+            self._field_widgets[key] = (lbl, w)
+
+        self._sv["inference_mode"].trace_add("write", self._on_mode_change)
 
         save_row = tk.Frame(sb, bg=SURFACE)
         save_row.pack(fill="x", pady=(10, 0))
         ttk.Button(save_row, text="Save Settings",
                    command=self._save_settings).pack(side="right")
+        self._manage_btn = ttk.Button(save_row, text="Manage Subscription",
+                                      command=self._open_portal)
+        self._manage_btn.pack(side="left")
 
         # ── Log card ─────────────────────────────────────────────────────────
         log_body = self._card(outer, expand=True)
@@ -306,19 +323,28 @@ class WatcherGUI:
 
     def _load_settings(self) -> None:
         cfg = cfg_mod.load()
+        self._sv["inference_mode"].set(
+            _MODE_CLOUD if cfg.get("inference_mode") == "cloud" else _MODE_LOCAL
+        )
         self._sv["discord_webhook"].set(cfg.get("discord_webhook") or "")
         self._sv["discord_user_id"].set(cfg.get("discord_user_id") or "")
         self._sv["model"].set(cfg.get("model", "qwen3.5:9b"))
+        self._sv["proxy_url"].set(cfg.get("proxy_url") or "")
+        self._sv["subscription_email"].set(cfg.get("subscription_email") or "")
         m = cfg.get("monitor")
         self._sv["monitor"].set(str(m) if m is not None else "Auto")
         self._sv["interval"].set(str(cfg.get("interval", 20)))
         self._sv["detect_interval"].set(str(cfg.get("detect_interval", 5)))
+        self._on_mode_change()
 
     def _save_settings(self) -> None:
         cfg = cfg_mod.load()
+        cfg["inference_mode"] = "cloud" if self._sv["inference_mode"].get() == _MODE_CLOUD else "local"
         cfg["discord_webhook"] = self._sv["discord_webhook"].get().strip() or None
         cfg["discord_user_id"] = self._sv["discord_user_id"].get().strip() or None
         cfg["model"] = self._sv["model"].get()
+        cfg["proxy_url"] = self._sv["proxy_url"].get().strip() or None
+        cfg["subscription_email"] = self._sv["subscription_email"].get().strip() or None
         raw_monitor = self._sv["monitor"].get().strip()
         cfg["monitor"] = int(raw_monitor) if raw_monitor.isdigit() else None
         try:
@@ -332,6 +358,55 @@ class WatcherGUI:
         cfg_mod.save(cfg)
         self._append_log("Settings saved.")
 
+    # ── Inference mode (local vs cloud) ───────────────────────────────────────
+
+    def _on_mode_change(self, *_args) -> None:
+        """Show local-only fields in Local mode and cloud-only fields in Cloud."""
+        cloud = self._sv["inference_mode"].get() == _MODE_CLOUD
+        for key in ("model",):
+            self._set_field_visible(key, not cloud)
+        for key in ("proxy_url", "subscription_email"):
+            self._set_field_visible(key, cloud)
+        if cloud:
+            self._manage_btn.pack(side="left")
+        else:
+            self._manage_btn.pack_forget()
+
+    def _set_field_visible(self, key: str, visible: bool) -> None:
+        lbl, w = self._field_widgets[key]
+        if visible:
+            lbl.grid()
+            w.grid()
+        else:
+            lbl.grid_remove()
+            w.grid_remove()
+
+    def _open_portal(self) -> None:
+        proxy = self._sv["proxy_url"].get().strip().rstrip("/")
+        email = self._sv["subscription_email"].get().strip()
+        if not proxy or not email:
+            self._append_log("Enter your Service URL and Subscription Email first.")
+            return
+        req = urllib.request.Request(
+            f"{proxy}/portal",
+            data=json.dumps({"email": email}).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": "ArmaWatcher/1.0"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                url = json.loads(resp.read())["url"]
+        except urllib.error.HTTPError as e:
+            if e.code in (402, 403):
+                self._append_log("No active subscription found for that email.")
+            else:
+                self._append_log(f"Could not open billing portal (error {e.code}).")
+            return
+        except Exception as e:
+            self._append_log(f"Could not reach billing service: {e}")
+            return
+        webbrowser.open(url)
+        self._append_log("Opened subscription management in your browser.")
+
     # ── Watcher control ──────────────────────────────────────────────────────
 
     def _start(self) -> None:
@@ -339,6 +414,11 @@ class WatcherGUI:
             return
         self._save_settings()
         cfg = cfg_mod.load()
+        if cfg.get("inference_mode") == "cloud" and (
+            not cfg.get("proxy_url") or not cfg.get("subscription_email")
+        ):
+            self._append_log("Cloud mode needs a Service URL and Subscription Email.")
+            return
         self._watcher = ArmaWatcher(
             monitor_index=cfg.get("monitor"),
             queue_interval=cfg.get("interval", 20),
@@ -347,6 +427,9 @@ class WatcherGUI:
             discord_user_id=cfg.get("discord_user_id"),
             model=cfg.get("model", "qwen3.5:9b"),
             log_callback=self._log_q.put,
+            inference_mode=cfg.get("inference_mode", "local"),
+            proxy_url=cfg.get("proxy_url"),
+            subscription_email=cfg.get("subscription_email"),
         )
         self._thread = threading.Thread(target=self._run_watcher, daemon=True)
         self._thread.start()

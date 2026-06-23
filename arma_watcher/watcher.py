@@ -12,7 +12,14 @@ _T = TypeVar("_T")
 
 import ollama
 
-from arma_watcher.inference import Inference, MODEL, ScreenState, ensure_model
+from arma_watcher.inference import (
+    CloudAuthError,
+    CloudRateLimitError,
+    MODEL,
+    ScreenState,
+    ensure_model,
+    make_inference,
+)
 from arma_watcher.screenshot import capture_to_bytes, list_monitors
 
 
@@ -80,6 +87,9 @@ class ArmaWatcher:
         discord_url: str | None = None,
         discord_user_id: str | None = None,
         log_callback: Callable[[str], None] | None = None,
+        inference_mode: str = "local",
+        proxy_url: str | None = None,
+        subscription_email: str | None = None,
     ):
         self.monitor_index = monitor_index
         self.queue_interval = queue_interval
@@ -88,10 +98,14 @@ class ArmaWatcher:
         self.discord_url = discord_url
         self.discord_user_id = discord_user_id
         self.log_callback = log_callback
+        self.inference_mode = inference_mode
+        self.proxy_url = proxy_url
+        self.subscription_email = subscription_email
         self.server_name: str | None = None
         self.history: list[QueueEntry] = []
         self.message_plan: MessagePlan | None = None
         self._notified_thresholds: set[int] = set()
+        self._inference = None
         self._stop = threading.Event()
         self.state = (
             WatcherState.SEARCHING_QUEUE
@@ -113,8 +127,15 @@ class ArmaWatcher:
                 self._log("Discord webhook OK.")
             else:
                 self._log("Discord webhook FAILED — check URL in config.")
+        if self.inference_mode == "cloud":
+            if not self.proxy_url or not self.subscription_email:
+                self._log("Cloud mode needs a proxy URL and subscription email — set them in Settings.")
+                return
+            self._log("Cloud inference mode — using subscription service.")
+
         try:
-            self._ollama_call(lambda: ensure_model(self.model, self._log))
+            if self.inference_mode != "cloud":
+                self._infer_call(lambda: ensure_model(self.model, self._log))
             while self.state != WatcherState.IN_GAME and not self._stop.is_set():
                 if self.state == WatcherState.SEARCHING_ARMA:
                     self._step_searching_arma()
@@ -122,17 +143,20 @@ class ArmaWatcher:
                     self._step_searching_queue()
                 elif self.state == WatcherState.IN_QUEUE:
                     self._step_in_queue()
-            Inference(model=self.model).unload()  # free VRAM
+            self._make_inference().unload()  # free VRAM (no-op in cloud mode)
             if self.state == WatcherState.IN_GAME:
                 self._log("You're in the game! LLM unloaded from VRAM.")
                 if self.discord_url:
                     _notify_discord(self.discord_url, f"{self._mention}You're in! Get on the server.")
             else:
                 self._log("Stopped.")
+        except CloudAuthError as e:
+            self._log(str(e))
+            self._log("Stopped.")
         except KeyboardInterrupt:
             print("\nStopping — unloading model from VRAM...")
             try:
-                Inference(model=self.model).unload()
+                self._make_inference().unload()
                 print("Model unloaded.")
             except Exception as e:
                 print(f"Could not unload model: {e}")
@@ -144,9 +168,9 @@ class ArmaWatcher:
 
     def _step_searching_arma(self) -> None:
         self._log("Scanning monitors for Arma Reforger...")
-        inference = Inference(model=self.model)
+        inference = self._make_inference()
         for i in range(1, len(list_monitors())):
-            if self._ollama_call(lambda i=i: inference.is_arma(capture_to_bytes(i))):
+            if self._infer_call(lambda i=i: inference.is_arma(capture_to_bytes(i))):
                 self.monitor_index = i
                 self.state = WatcherState.SEARCHING_QUEUE
                 self._log(f"Arma Reforger detected on monitor {i}. Waiting for queue...")
@@ -193,25 +217,53 @@ class ArmaWatcher:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _make_inference(self):
+        """Build (and cache) the inference backend for the configured mode.
+
+        Caching keeps the cloud backend's session token alive across polls
+        instead of re-exchanging the email on every call.
+        """
+        if self._inference is None:
+            self._inference = make_inference(
+                {
+                    "inference_mode": self.inference_mode,
+                    "proxy_url": self.proxy_url,
+                    "subscription_email": self.subscription_email,
+                    "model": self.model,
+                },
+                model=self.model,
+            )
+        return self._inference
+
     def _get_screen_state(self) -> ScreenState:
-        return self._ollama_call(
-            lambda: Inference(model=self.model).get_screen_state(capture_to_bytes(self.monitor_index))
+        return self._infer_call(
+            lambda: self._make_inference().get_screen_state(capture_to_bytes(self.monitor_index))
         )
 
-    def _ollama_call(self, fn: Callable[[], _T]) -> _T:
-        _OLLAMA_RETRY = 15
+    def _infer_call(self, fn: Callable[[], _T]) -> _T:
+        """Run an inference call, retrying transient backend failures.
+
+        ConnectionError (Ollama down / proxy unreachable) and rate limits are
+        retried; CloudAuthError is *not* caught here — it propagates to run()
+        so the watcher stops with a clear message.
+        """
+        _RETRY = 15
+        _RATE_LIMIT_BACKOFF = 60
         while True:
             try:
                 return fn()
             except ConnectionError:
                 self._log(
-                    f"Ollama is not running. Start Ollama and this watcher will resume automatically. "
-                    f"Retrying in {_OLLAMA_RETRY}s..."
+                    f"Inference backend unavailable (Ollama stopped or proxy unreachable). "
+                    f"Retrying in {_RETRY}s..."
                 )
-                time.sleep(_OLLAMA_RETRY)
+                time.sleep(_RETRY)
             except ollama.ResponseError as e:
-                self._log(f"Ollama error ({e.status_code}): {e.error}. Retrying in {_OLLAMA_RETRY}s...")
-                time.sleep(_OLLAMA_RETRY)
+                self._log(f"Ollama error ({e.status_code}): {e.error}. Retrying in {_RETRY}s...")
+                time.sleep(_RETRY)
+            except CloudRateLimitError:
+                self._log(f"Rate limited by subscription service. Backing off {_RATE_LIMIT_BACKOFF}s...")
+                time.sleep(_RATE_LIMIT_BACKOFF)
 
     def _record(self, position: int) -> None:
         self.history.append(QueueEntry(datetime.now(), position))

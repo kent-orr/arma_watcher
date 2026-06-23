@@ -13,6 +13,11 @@ DEFAULTS = {
     "monitor": None,
     "interval": 20,
     "detect_interval": 5,
+    # Inference backend: "local" runs the model on the user's own VRAM via
+    # Ollama; "cloud" routes screenshots through the subscription proxy.
+    "inference_mode": "local",
+    "proxy_url": None,           # e.g. https://my-service.example.com
+    "subscription_email": None,  # purchase email, exchanged for a session token
 }
 
 _MODELS = [
