@@ -6,8 +6,24 @@ Builds `ArmaWatcherSetup.exe` — a point-and-click Windows installer.
 
 | File | Purpose |
 |---|---|
-| `arma_watcher.iss` | [Inno Setup](https://jrsoftware.org/isinfo.php) script. Bundles the app, runs the bootstrap, creates shortcuts. Per-user install (no admin / UAC). |
-| `bootstrap.ps1` | Runs after files are copied: installs uv, fetches Python, installs Ollama, runs `uv sync`. |
+| `arma_watcher.iss` | [Inno Setup](https://jrsoftware.org/isinfo.php) script. Bundles the app, shows a model-picker page, runs the bootstrap, creates shortcuts. Per-user install (no admin / UAC). |
+| `bootstrap.ps1` | Runs after files are copied: installs uv, fetches Python, installs Ollama, runs `uv sync`, saves the chosen model, and pulls it. Takes `-Model` and `-LogFile`. |
+
+## Wizard flow
+
+The `[Code]` section adds two custom pages:
+
+1. **Choose a vision model** — radio buttons for the four `qwen3.5` sizes (with
+   VRAM hints), plus a "don't download now" option. The choice is saved to
+   `~/.arma_watcher/config.json` and pre-pulled during install.
+2. **Setting up Arma Watcher** — the bootstrap runs as a *hidden* PowerShell
+   process; its output is tailed live into a read-only log box on the page, so
+   no separate console window ever appears. A `DONE:<exitcode>` sentinel file in
+   `{tmp}` signals completion. Next stays disabled until it finishes.
+
+Because the bootstrap is launched from `[Code]` (not `[Run]`), it must never
+prompt for input — a hidden window can't be answered. It logs errors and exits
+non-zero instead.
 
 ## Cut a release (recommended)
 

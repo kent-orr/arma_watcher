@@ -1,15 +1,34 @@
 # Arma Watcher - post-install bootstrap
-# Invoked by the Inno Setup installer after files are copied.
-# Installs uv (Python package manager), Ollama, fetches Python, and syncs
-# dependencies into an isolated environment inside the install folder.
-# Shortcuts are created by the installer, not here.
+# Invoked (hidden) by the Inno Setup installer after files are copied. Every line
+# of progress is streamed to -LogFile, which the installer tails into its own
+# wizard window, so the user never sees a separate console pop up.
+#
+# Installs uv (Python package manager), fetches Python, installs Ollama, runs
+# uv sync, saves the chosen model to the app config, and pulls that model.
+
+param(
+    [string]$Model   = "qwen3.5:9b",
+    [string]$LogFile = ""
+)
 
 $ErrorActionPreference = "Stop"
 
-function Write-Step { param($msg) Write-Host "`n==> $msg" -ForegroundColor Cyan }
-function Write-OK   { param($msg) Write-Host "    OK  $msg" -ForegroundColor Green }
-function Write-Warn { param($msg) Write-Host "    >>  $msg" -ForegroundColor Yellow }
-function Write-Err  { param($msg) Write-Host "`nERROR: $msg" -ForegroundColor Red }
+# Append a line to both stdout and the shared log file the installer tails.
+# Retries briefly because the installer holds a (read) handle on the log every
+# ~250ms; a momentary sharing collision should not drop the line.
+function Log {
+    param([string]$msg = "")
+    Write-Output $msg
+    if ($LogFile) {
+        for ($i = 0; $i -lt 5; $i++) {
+            try { Add-Content -Path $LogFile -Value $msg -Encoding ascii; break }
+            catch { Start-Sleep -Milliseconds 50 }
+        }
+    }
+}
+function Step { param($m) Log ""; Log ("==> " + $m) }
+function OK   { param($m) Log ("    OK  " + $m) }
+function Warn { param($m) Log ("    >>  " + $m) }
 
 function Refresh-Path {
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
@@ -17,73 +36,95 @@ function Refresh-Path {
                 (Join-Path $env:USERPROFILE ".local\bin")
 }
 
-# Run from the install folder (the directory this script lives in is installer\,
-# the app root is its parent).
+# Persist the chosen model into the same config the GUI reads, merging with any
+# existing config so we never clobber other settings.
+function Save-Model {
+    param([string]$model)
+    $dir  = Join-Path $env:USERPROFILE ".arma_watcher"
+    $path = Join-Path $dir "config.json"
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+    $cfg = @{}
+    if (Test-Path $path) {
+        try {
+            $existing = Get-Content $path -Raw | ConvertFrom-Json
+            foreach ($p in $existing.PSObject.Properties) { $cfg[$p.Name] = $p.Value }
+        } catch {}
+    }
+    $cfg["model"] = $model
+    # WriteAllText emits UTF-8 with no BOM, which Python's json.loads can read.
+    [System.IO.File]::WriteAllText($path, ($cfg | ConvertTo-Json -Depth 6))
+}
+
+# The app root is the parent of installer\ (where this script lives).
 $AppRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $AppRoot
-
-Write-Host "Setting up Arma Watcher in: $AppRoot" -ForegroundColor White
+Log ("Setting up Arma Watcher in: " + $AppRoot)
 
 try {
     # uv ---------------------------------------------------------------------
-    Write-Step "Checking uv (Python package manager)..."
+    Step "Checking uv (Python package manager)..."
     Refresh-Path
     if (Get-Command uv -ErrorAction SilentlyContinue) {
-        Write-OK "uv already installed."
+        OK "uv already installed."
     } else {
-        Write-Warn "uv not found - installing from astral.sh..."
+        Warn "uv not found - installing from astral.sh..."
         irm https://astral.sh/uv/install.ps1 | iex
         Refresh-Path
         if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-            Write-Err "uv install failed. See https://docs.astral.sh/uv/"
-            exit 1
+            throw "uv install failed. See https://docs.astral.sh/uv/"
         }
-        Write-OK "uv installed."
+        OK "uv installed."
     }
 
     # Python (managed by uv, pinned to .python-version) ----------------------
-    Write-Step "Checking Python..."
-    uv python install | Out-Null
-    Write-OK "Python ready."
+    Step "Installing Python..."
+    uv python install *> $null
+    OK "Python ready."
 
     # Ollama -----------------------------------------------------------------
-    Write-Step "Checking Ollama..."
+    Step "Checking Ollama..."
     if (Get-Command ollama -ErrorAction SilentlyContinue) {
-        Write-OK "Ollama already installed."
+        OK "Ollama already installed."
     } else {
-        Write-Warn "Ollama not found - installing from ollama.com..."
+        Warn "Ollama not found - installing from ollama.com..."
         irm https://ollama.com/install.ps1 | iex
         Refresh-Path
         if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
-            Write-Err "Ollama install failed. See https://ollama.com"
-            exit 1
+            throw "Ollama install failed. See https://ollama.com"
         }
-        Write-OK "Ollama installed."
+        OK "Ollama installed."
     }
 
     # Python dependencies ----------------------------------------------------
-    Write-Step "Installing Python dependencies (this can take a few minutes)..."
-    uv sync
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "uv sync failed."
-        exit 1
-    }
-    Write-OK "Dependencies installed."
+    Step "Installing Python dependencies (this can take a few minutes)..."
+    uv sync 2>&1 | ForEach-Object { Log ([string]$_) }
+    if ($LASTEXITCODE -ne 0) { throw "uv sync failed." }
+    OK "Dependencies installed."
 
-    Write-Host ""
-    Write-Host "Arma Watcher is ready!" -ForegroundColor Green
-    Write-Host "    Use the 'Arma Watcher' shortcut on your Desktop or Start Menu to open it." -ForegroundColor White
-    Write-Host ""
-    Start-Sleep -Seconds 3
+    # Model ------------------------------------------------------------------
+    if ($Model -and $Model -ne "none") {
+        Step ("Saving model choice: " + $Model)
+        Save-Model $Model
+        OK "Saved to config."
+
+        Step ("Downloading model " + $Model + " (this can be several GB - please wait)...")
+        ollama pull $Model 2>&1 | ForEach-Object { Log ([string]$_) }
+        if ($LASTEXITCODE -ne 0) {
+            Warn "Model download did not finish. Arma Watcher will pull it on first launch."
+        } else {
+            OK ("Model " + $Model + " ready.")
+        }
+    } else {
+        Step "No model selected - pick one anytime in the app's Settings panel."
+    }
+
+    Log ""
+    Log "Arma Watcher is ready!"
+    Log "Use the 'Arma Watcher' shortcut on your Desktop or Start Menu to open it."
     exit 0
 }
 catch {
-    Write-Err $_
-    Write-Host ""
-    Write-Host "Setup did not complete. You can retry by re-running the installer," -ForegroundColor Yellow
-    Write-Host "or open the install folder and run install.bat manually." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Press any key to close..." -ForegroundColor White
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    Log ""
+    Log ("ERROR: " + $_.Exception.Message)
     exit 1
 }

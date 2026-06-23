@@ -3,7 +3,7 @@
 ; CI can override the version: ISCC.exe /DMyAppVersion=1.2.3 installer\arma_watcher.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "0.1.1"
 #endif
 
 #define MyAppName "Arma Watcher"
@@ -72,13 +72,159 @@ Name: "{group}\Update Arma Watcher"; Filename: "{app}\update.bat"; WorkingDir: "
 Name: "{group}\Uninstall Arma Watcher"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Arma Watcher"; Filename: "{win}\System32\wscript.exe"; Parameters: """{app}\launch_gui.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\arma_watcher\assets\icon.ico"; Comment: "Start Arma Watcher"; Tasks: desktopicon
 
-[Run]
-; Heavy lifting: install uv, Ollama, Python and sync dependencies. Shown in a
-; visible console so the user can watch progress (this can take several minutes).
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\bootstrap.ps1"""; StatusMsg: "Installing uv, Ollama, and Python dependencies (this can take several minutes)..."; Flags: waituntilterminated
+; Note: the heavy lifting (uv, Ollama, Python deps, model pull) is run from the
+; [Code] section below on a custom wizard page, with a hidden PowerShell process
+; whose output is tailed live into an in-wizard log box. This replaces the old
+; visible console window so nothing scary pops up outside the installer.
 
 [UninstallDelete]
 ; Remove the isolated virtual environment and caches created at runtime.
 Type: filesandordirs; Name: "{app}\.venv"
 Type: filesandordirs; Name: "{app}\arma_watcher\__pycache__"
 Type: filesandordirs; Name: "{app}\arma_watcher.egg-info"
+
+[Code]
+const
+  SW_HIDE = 0;
+  EM_SCROLLCARET = $00B7;
+
+function SendMessage(Wnd: HWND; Msg, WParam, LParam: Longint): Longint;
+  external 'SendMessageW@user32.dll stdcall';
+
+var
+  ModelPage: TInputOptionWizardPage;
+  LogPage: TWizardPage;
+  LogMemo: TNewMemo;
+  ModelTags: array[0..4] of String;
+  BootstrapStarted: Boolean;
+
+procedure InitializeWizard;
+begin
+  // Order must match the radio buttons added below; 'none' = skip the download.
+  ModelTags[0] := 'qwen3.5:0.8b';
+  ModelTags[1] := 'qwen3.5:2b';
+  ModelTags[2] := 'qwen3.5:4b';
+  ModelTags[3] := 'qwen3.5:9b';
+  ModelTags[4] := 'none';
+
+  ModelPage := CreateInputOptionPage(wpSelectTasks,
+    'Choose a vision model',
+    'Arma Watcher reads your screen with a local AI model.',
+    'Pick the model to download during setup. Bigger models are more accurate but'
+    + ' need more video memory (VRAM). You can change this later inside the app.',
+    True, False);
+  ModelPage.Add('qwen3.5:0.8b   -   ~1.0 GB VRAM   (fastest, least accurate)');
+  ModelPage.Add('qwen3.5:2b     -   ~2.7 GB VRAM');
+  ModelPage.Add('qwen3.5:4b     -   ~3.4 GB VRAM');
+  ModelPage.Add('qwen3.5:9b     -   ~6.6 GB VRAM   (recommended)');
+  ModelPage.Add('Don''t download a model now  -  I''ll choose one later in the app');
+  ModelPage.SelectedValueIndex := 3;
+
+  // Custom page shown right after the file-copy step, where the bootstrap runs
+  // and streams its output into a read-only memo.
+  LogPage := CreateCustomPage(wpInstalling,
+    'Setting up Arma Watcher',
+    'Installing uv, Ollama, Python dependencies and your model.'
+    + ' This can take several minutes - hang tight.');
+
+  LogMemo := TNewMemo.Create(WizardForm);
+  LogMemo.Parent := LogPage.Surface;
+  LogMemo.SetBounds(0, 0, LogPage.SurfaceWidth, LogPage.SurfaceHeight);
+  LogMemo.ScrollBars := ssVertical;
+  LogMemo.ReadOnly := True;
+  LogMemo.WordWrap := False;
+  LogMemo.Font.Name := 'Consolas';
+  LogMemo.Font.Size := 9;
+end;
+
+function GetSelectedModel: String;
+begin
+  Result := ModelTags[ModelPage.SelectedValueIndex];
+end;
+
+// Pull any lines the bootstrap has written since we last looked into the memo.
+procedure AppendNewLines(var Shown: Integer);
+var
+  Lines: TArrayOfString;
+  i: Integer;
+begin
+  if LoadStringsFromFile(ExpandConstant('{tmp}\aw_bootstrap.log'), Lines) then
+  begin
+    if GetArrayLength(Lines) > Shown then
+    begin
+      for i := Shown to GetArrayLength(Lines) - 1 do
+        LogMemo.Lines.Add(Lines[i]);
+      Shown := GetArrayLength(Lines);
+      SendMessage(LogMemo.Handle, EM_SCROLLCARET, 0, 0);
+      LogMemo.Update;
+    end;
+  end;
+end;
+
+procedure RunBootstrap;
+var
+  LogFile, DoneFile, Params: String;
+  DoneText: AnsiString;
+  ResultCode, Shown: Integer;
+begin
+  LogFile  := ExpandConstant('{tmp}\aw_bootstrap.log');
+  DoneFile := ExpandConstant('{tmp}\aw_bootstrap.done');
+  DeleteFile(LogFile);
+  DeleteFile(DoneFile);
+  SaveStringToFile(LogFile, '', False);
+
+  // Run PowerShell hidden, then unconditionally (&) drop a sentinel file with its
+  // exit code so we know when (and whether) it finished even though we don't wait
+  // on it. /V:ON + !ERRORLEVEL! forces delayed expansion, otherwise cmd would
+  // bake in the errorlevel from before PowerShell even runs (always 0).
+  Params := '/V:ON /C powershell.exe -NoProfile -ExecutionPolicy Bypass -File "'
+    + ExpandConstant('{app}\installer\bootstrap.ps1')
+    + '" -Model "' + GetSelectedModel + '" -LogFile "' + LogFile
+    + '" & echo DONE:!ERRORLEVEL!>"' + DoneFile + '"';
+
+  WizardForm.BackButton.Enabled := False;
+  WizardForm.NextButton.Enabled := False;
+  WizardForm.CancelButton.Enabled := False;
+
+  if not Exec(ExpandConstant('{cmd}'), Params, '', SW_HIDE, ewNoWait, ResultCode) then
+  begin
+    LogMemo.Lines.Add('ERROR: could not start the setup process.');
+    WizardForm.NextButton.Enabled := True;
+    WizardForm.CancelButton.Enabled := True;
+    Exit;
+  end;
+
+  Shown := 0;
+  repeat
+    AppendNewLines(Shown);
+    WizardForm.Update;
+    Sleep(250);
+  until FileExists(DoneFile);
+
+  // The bootstrap may still be flushing its last lines when the sentinel lands.
+  Sleep(250);
+  AppendNewLines(Shown);
+
+  DoneText := '';
+  LoadStringFromFile(DoneFile, DoneText);
+  if Pos('DONE:0', DoneText) = 0 then
+  begin
+    LogMemo.Lines.Add('');
+    LogMemo.Lines.Add('Setup hit a problem. You can close this and re-run the installer,');
+    LogMemo.Lines.Add('or open the install folder and run install.bat manually.');
+    SendMessage(LogMemo.Handle, EM_SCROLLCARET, 0, 0);
+  end;
+
+  WizardForm.NextButton.Enabled := True;
+  WizardForm.CancelButton.Enabled := True;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  // Kick off the (one-time) bootstrap as soon as the log page is shown.
+  if (CurPageID = LogPage.ID) and (not BootstrapStarted) then
+  begin
+    BootstrapStarted := True;
+    RunBootstrap;
+  end;
+end;
