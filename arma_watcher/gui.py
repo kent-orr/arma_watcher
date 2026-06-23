@@ -280,9 +280,15 @@ class WatcherGUI:
         save_row.pack(fill="x", pady=(10, 0))
         ttk.Button(save_row, text="Save Settings",
                    command=self._save_settings).pack(side="right")
+        self._subscribe_btn = ttk.Button(save_row, text="Subscribe",
+                                         command=lambda: self._open_checkout("sub"))
+        self._subscribe_btn.pack(side="left")
+        self._donate_btn = ttk.Button(save_row, text="Donate",
+                                      command=lambda: self._open_checkout("don"))
+        self._donate_btn.pack(side="left", padx=(6, 0))
         self._manage_btn = ttk.Button(save_row, text="Manage Subscription",
                                       command=self._open_portal)
-        self._manage_btn.pack(side="left")
+        self._manage_btn.pack(side="left", padx=(6, 0))
 
         # ── Log card ─────────────────────────────────────────────────────────
         log_body = self._card(outer, expand=True)
@@ -368,8 +374,12 @@ class WatcherGUI:
         for key in ("proxy_url", "subscription_email"):
             self._set_field_visible(key, cloud)
         if cloud:
-            self._manage_btn.pack(side="left")
+            self._subscribe_btn.pack(side="left")
+            self._donate_btn.pack(side="left", padx=(6, 0))
+            self._manage_btn.pack(side="left", padx=(6, 0))
         else:
+            self._subscribe_btn.pack_forget()
+            self._donate_btn.pack_forget()
             self._manage_btn.pack_forget()
 
     def _set_field_visible(self, key: str, visible: bool) -> None:
@@ -381,15 +391,17 @@ class WatcherGUI:
             lbl.grid_remove()
             w.grid_remove()
 
-    def _open_portal(self) -> None:
+    def _open_billing(self, path: str, payload: dict, success_msg: str,
+                      no_sub_msg: str) -> None:
+        """POST {email, ...} to the proxy and open the returned hosted URL."""
         proxy = self._sv["proxy_url"].get().strip().rstrip("/")
         email = self._sv["subscription_email"].get().strip()
         if not proxy or not email:
             self._append_log("Enter your Service URL and Subscription Email first.")
             return
         req = urllib.request.Request(
-            f"{proxy}/portal",
-            data=json.dumps({"email": email}).encode(),
+            f"{proxy}{path}",
+            data=json.dumps({"email": email, **payload}).encode(),
             headers={"Content-Type": "application/json", "User-Agent": "ArmaWatcher/1.0"},
         )
         try:
@@ -397,15 +409,29 @@ class WatcherGUI:
                 url = json.loads(resp.read())["url"]
         except urllib.error.HTTPError as e:
             if e.code in (402, 403):
-                self._append_log("No active subscription found for that email.")
+                self._append_log(no_sub_msg)
             else:
-                self._append_log(f"Could not open billing portal (error {e.code}).")
+                self._append_log(f"Could not reach billing service (error {e.code}).")
             return
         except Exception as e:
             self._append_log(f"Could not reach billing service: {e}")
             return
         webbrowser.open(url)
-        self._append_log("Opened subscription management in your browser.")
+        self._append_log(success_msg)
+
+    def _open_portal(self) -> None:
+        self._open_billing(
+            "/portal", {},
+            "Opened subscription management in your browser.",
+            "No active subscription found for that email.",
+        )
+
+    def _open_checkout(self, kind: str) -> None:
+        self._open_billing(
+            "/checkout", {"kind": kind},
+            "Opened Stripe checkout in your browser.",
+            "Checkout is unavailable for that email.",
+        )
 
     # ── Watcher control ──────────────────────────────────────────────────────
 

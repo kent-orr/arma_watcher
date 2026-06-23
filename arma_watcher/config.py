@@ -1,10 +1,20 @@
 import json
+import os
 import pathlib
 import platform
 import shutil
 import subprocess
 
 CONFIG_PATH = pathlib.Path.home() / ".arma_watcher" / "config.json"
+
+# Env vars that override the saved config at load time. Used by the dev launcher
+# (dev.ps1) to point the GUI at a local arma_watcher_server for integration
+# testing without editing — or persisting anything to — config.json.
+_ENV_OVERRIDES = {
+    "inference_mode": "ARMA_WATCHER_INFERENCE_MODE",
+    "proxy_url": "ARMA_WATCHER_PROXY_URL",
+    "subscription_email": "ARMA_WATCHER_SUBSCRIPTION_EMAIL",
+}
 
 DEFAULTS = {
     "discord_webhook": None,
@@ -36,18 +46,41 @@ _PROMPTS = [
 ]
 
 
+def _apply_env_overrides(cfg: dict) -> dict:
+    for key, env in _ENV_OVERRIDES.items():
+        val = os.environ.get(env)
+        if val:
+            cfg[key] = val
+    return cfg
+
+
 def load() -> dict:
     if CONFIG_PATH.exists():
         try:
-            return {**DEFAULTS, **json.loads(CONFIG_PATH.read_text())}
+            return _apply_env_overrides({**DEFAULTS, **json.loads(CONFIG_PATH.read_text())})
         except Exception:
             pass
-    return dict(DEFAULTS)
+    return _apply_env_overrides(dict(DEFAULTS))
 
 
 def save(cfg: dict) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+    existing = {}
+    if CONFIG_PATH.exists():
+        try:
+            existing = json.loads(CONFIG_PATH.read_text())
+        except Exception:
+            existing = {}
+    to_write = dict(cfg)
+    # Don't let a dev env override leak into config.json: for any key currently
+    # supplied by an override, keep the real on-disk value (or omit it).
+    for key, env in _ENV_OVERRIDES.items():
+        if os.environ.get(env):
+            if key in existing:
+                to_write[key] = existing[key]
+            else:
+                to_write.pop(key, None)
+    CONFIG_PATH.write_text(json.dumps(to_write, indent=2))
 
 
 def _ensure_ollama() -> None:

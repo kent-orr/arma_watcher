@@ -134,6 +134,20 @@ Any saved setting can be overridden at launch:
 
 Config lives at `C:\Users\<you>\.arma_watcher\config.json`.
 
+### Dev: run against a local inference proxy
+
+To integration-test against a locally running
+[`arma_watcher_server`](../arma_watcher_server) instead of the saved config:
+
+```powershell
+.\dev.ps1   # cloud mode → http://localhost:5000 as dev@armawatcher.local
+```
+
+It sets `ARMA_WATCHER_INFERENCE_MODE` / `ARMA_WATCHER_PROXY_URL` /
+`ARMA_WATCHER_SUBSCRIPTION_EMAIL` as env overrides (honored by `config.load()`),
+so your real `config.json` is left untouched. Start the server side first — see
+that repo's README → *Dev integration testing with the GUI*.
+
 ---
 
 ## License
