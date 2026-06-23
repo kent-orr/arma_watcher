@@ -85,8 +85,7 @@ Type: filesandordirs; Name: "{app}\arma_watcher.egg-info"
 
 [Code]
 const
-  SW_HIDE = 0;
-  EM_SCROLLCARET = $00B7;
+  EM_SCROLLCARET = $00B7;  { SW_HIDE is already a built-in Inno constant }
 
 function SendMessage(Wnd: HWND; Msg, WParam, LParam: Longint): Longint;
   external 'SendMessageW@user32.dll stdcall';
