@@ -3,7 +3,7 @@
 ; CI can override the version: ISCC.exe /DMyAppVersion=1.2.3 installer\arma_watcher.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.2"
+  #define MyAppVersion "0.1.3"
 #endif
 
 #define MyAppName "Arma Watcher"

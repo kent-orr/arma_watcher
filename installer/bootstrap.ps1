@@ -17,12 +17,13 @@ param(
 # instead, and `throw` explicitly when a step genuinely fails.
 $ErrorActionPreference = "Continue"
 
-# Append a line to both stdout and the shared log file the installer tails.
-# Retries briefly because the installer holds a (read) handle on the log every
-# ~250ms; a momentary sharing collision should not drop the line.
+# Append a line to the shared log file the installer tails. Retries briefly
+# because the installer holds a (read) handle on the log every ~250ms; a
+# momentary sharing collision should not drop the line. Note: this deliberately
+# does NOT Write-Output - the hidden console's stdout goes nowhere, and emitting
+# here would pollute the return value of callers like Invoke-Logged.
 function Log {
     param([string]$msg = "")
-    Write-Output $msg
     if ($LogFile) {
         for ($i = 0; $i -lt 5; $i++) {
             try { Add-Content -Path $LogFile -Value $msg -Encoding ascii; break }
@@ -36,9 +37,11 @@ function Warn { param($m) Log ("    >>  " + $m) }
 
 # Run a native command, stream its output (stdout + stderr) into the log, and
 # return its exit code. Safe under $ErrorActionPreference = "Continue".
+# NB: the parameter must NOT be named $Args - that's an automatic variable, and
+# splatting it would pass no arguments to the command.
 function Invoke-Logged {
-    param([string]$Exe, [string[]]$Args)
-    & $Exe @Args 2>&1 | ForEach-Object { Log ([string]$_) }
+    param([string]$Exe, [string[]]$ArgList)
+    & $Exe @ArgList 2>&1 | ForEach-Object { Log ([string]$_) }
     return $LASTEXITCODE
 }
 
