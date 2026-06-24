@@ -38,6 +38,72 @@ _MODE_CLOUD = "Cloud (subscription)"
 _MODES = [_MODE_LOCAL, _MODE_CLOUD]
 _FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "kent_handwriting.ttf")
 
+# One-time "Tip the Developer" Stripe Payment Link — a static hosted checkout URL
+# created once in the Stripe Dashboard. It needs no email, Service URL, or server
+# round-trip, so tipping works even in free/local mode. Overridable at runtime via
+# the TIP_PAYMENT_LINK env var; the constant below is the baked-in fallback.
+TIP_PAYMENT_LINK_ENV = "TIP_PAYMENT_LINK"
+TIP_PAYMENT_LINK = "https://buy.stripe.com/test_5kQ9AUeuU3IfgdFeYL7Re00"
+
+
+def _tip_link() -> str:
+    """The tip Payment Link — env var wins, else the baked-in default."""
+    return os.environ.get(TIP_PAYMENT_LINK_ENV) or TIP_PAYMENT_LINK
+
+# ── Legal: shown as a consent gate before cloud checkout ──────────────────────
+LEGAL_STRIPE_PRIVACY = "https://stripe.com/privacy"
+LEGAL_DO_AUP = "https://www.digitalocean.com/legal/acceptable-use-policy"
+LEGAL_DO_PRIVACY = "https://www.digitalocean.com/legal/privacy-policy"
+
+TERMS_TEXT = """\
+Arma Watcher Cloud is an optional paid service that reads your Arma Reforger \
+queue screen using DigitalOcean's serverless AI inference.
+
+1. Acceptable use. You agree to submit only Arma Reforger gameplay screenshots \
+for queue detection. You will not abuse the image-recognition service or submit \
+any image that violates DigitalOcean's serverless inference Acceptable Use \
+Policy (linked below) — including illegal, infringing, or abusive content. \
+Misuse may result in immediate termination without refund.
+
+2. Subscription & billing. Billing is handled by Stripe on a recurring basis. \
+You can cancel at any time from "Manage Subscription"; access continues until \
+the end of the paid period.
+
+3. No warranty. The service is provided "as is", without warranties of any \
+kind. Queue readings are best-effort and may be inaccurate; do not rely on them \
+as your only signal.
+
+4. Limitation of liability. To the maximum extent permitted by law, our total \
+liability for any claim arising out of or relating to the service is limited to \
+the amount you have actually paid for the service. We are not liable for \
+indirect, incidental, or consequential damages.
+
+5. Not affiliated with Bohemia Interactive. "Arma Reforger" is a trademark of \
+its respective owner."""
+
+PRIVACY_TEXT = """\
+We designed Arma Watcher Cloud so that we cannot view your images, even if we \
+wanted to.
+
+What is sent. In cloud mode, screenshots of the monitor you select are sent \
+over an encrypted connection to our proxy and forwarded directly to \
+DigitalOcean's serverless inference for a single queue-position reading.
+
+Not stored, not viewable. Images are processed in memory for that one reading \
+and are never written to disk or retained by us. We keep no copies and have no \
+mechanism to view, log, or recover the images you submit.
+
+Your screenshots, your call. Be aware that enabling cloud mode sends pictures \
+of your desktop off of your computer and out into the world. If your screen \
+shows private messages, other windows, or anything sensitive, that leaves your \
+PC too. Capturing only the game — and choosing the right monitor — is your \
+responsibility.
+
+What we keep. To run billing and let you recover your key, we store your \
+purchase email and subscription status. Payments are processed by Stripe — we \
+never see or store your card details. See the linked policies for how Stripe \
+and DigitalOcean handle your data."""
+
 
 def _read_ttf_family(path: str) -> str | None:
     """Parse the name table of a TTF/OTF file and return the family name."""
@@ -254,6 +320,7 @@ class WatcherGUI:
             ("discord_user_id",    "Discord User ID",    "entry",   {}),
             ("model",              "Model",              "combo",   {"values": _MODELS, "state": "readonly", "width": 18}),
             ("proxy_url",          "Service URL",        "entry",   {}),
+            ("license_key",        "License Key",        "entry",   {"show": "•"}),
             ("subscription_email", "Subscription Email", "entry",   {}),
             ("monitor",            "Monitor",            "combo",   {"values": ["Auto", "1", "2", "3", "4", "5"], "width": 8}),
             ("interval",           "Queue Interval (s)", "spinbox", {"from_": 5, "to": 300, "width": 8}),
@@ -275,20 +342,23 @@ class WatcherGUI:
             self._field_widgets[key] = (lbl, w)
 
         self._sv["inference_mode"].trace_add("write", self._on_mode_change)
+        self._sv["license_key"].trace_add("write", self._sync_subscribe_visible)
 
         save_row = tk.Frame(sb, bg=SURFACE)
         save_row.pack(fill="x", pady=(10, 0))
         ttk.Button(save_row, text="Save Settings",
                    command=self._save_settings).pack(side="right")
+        # Cloud-only billing buttons — packed/forgotten by _on_mode_change, and
+        # Subscribe additionally hidden once a license key exists (see
+        # _sync_subscribe_visible). Donate moved to the always-on tip button below.
         self._subscribe_btn = ttk.Button(save_row, text="Subscribe",
-                                         command=lambda: self._open_checkout("sub"))
-        self._subscribe_btn.pack(side="left")
-        self._donate_btn = ttk.Button(save_row, text="Donate",
-                                      command=lambda: self._open_checkout("don"))
-        self._donate_btn.pack(side="left", padx=(6, 0))
+                                         command=self._subscribe)
         self._manage_btn = ttk.Button(save_row, text="Manage Subscription",
                                       command=self._open_portal)
-        self._manage_btn.pack(side="left", padx=(6, 0))
+        self._show_key_btn = ttk.Button(save_row, text="Show Key",
+                                        command=self._toggle_key_visible)
+        self._recover_btn = ttk.Button(save_row, text="Email Me a New Key",
+                                       command=self._recover_key)
 
         # ── Log card ─────────────────────────────────────────────────────────
         log_body = self._card(outer, expand=True)
@@ -325,6 +395,13 @@ class WatcherGUI:
         # Patch log_body's outer Frame so it also fills vertically
         log_body.master.pack_configure(fill="both", expand=True)
 
+        # ── Tip jar ──────────────────────────────────────────────────────────
+        # Always visible, full width, at the very bottom — independent of cloud
+        # vs. local. Opens a one-time Stripe Payment Link (no email/Service URL).
+        self._donate_btn = ttk.Button(outer, text="Tip the Developer",
+                                      style="Gold.TButton", command=self._open_tip)
+        self._donate_btn.pack(fill="x", pady=(8, 0))
+
     # ── Settings ─────────────────────────────────────────────────────────────
 
     def _load_settings(self) -> None:
@@ -336,6 +413,7 @@ class WatcherGUI:
         self._sv["discord_user_id"].set(cfg.get("discord_user_id") or "")
         self._sv["model"].set(cfg.get("model", "qwen3.5:9b"))
         self._sv["proxy_url"].set(cfg.get("proxy_url") or "")
+        self._sv["license_key"].set(cfg.get("license_key") or "")
         self._sv["subscription_email"].set(cfg.get("subscription_email") or "")
         m = cfg.get("monitor")
         self._sv["monitor"].set(str(m) if m is not None else "Auto")
@@ -350,6 +428,7 @@ class WatcherGUI:
         cfg["discord_user_id"] = self._sv["discord_user_id"].get().strip() or None
         cfg["model"] = self._sv["model"].get()
         cfg["proxy_url"] = self._sv["proxy_url"].get().strip() or None
+        cfg["license_key"] = self._sv["license_key"].get().strip() or None
         cfg["subscription_email"] = self._sv["subscription_email"].get().strip() or None
         raw_monitor = self._sv["monitor"].get().strip()
         cfg["monitor"] = int(raw_monitor) if raw_monitor.isdigit() else None
@@ -369,18 +448,32 @@ class WatcherGUI:
     def _on_mode_change(self, *_args) -> None:
         """Show local-only fields in Local mode and cloud-only fields in Cloud."""
         cloud = self._sv["inference_mode"].get() == _MODE_CLOUD
-        for key in ("model",):
+        # Local-only: the model picker and the polling-interval spinboxes —
+        # cloud meters/paces inference server-side, so they're hidden there.
+        for key in ("model", "interval", "detect_interval"):
             self._set_field_visible(key, not cloud)
-        for key in ("proxy_url", "subscription_email"):
+        for key in ("proxy_url", "license_key", "subscription_email"):
             self._set_field_visible(key, cloud)
+        cloud_btns = (self._manage_btn, self._show_key_btn, self._recover_btn)
         if cloud:
-            self._subscribe_btn.pack(side="left")
-            self._donate_btn.pack(side="left", padx=(6, 0))
-            self._manage_btn.pack(side="left", padx=(6, 0))
+            for btn in cloud_btns:
+                btn.pack(side="left", padx=(6, 0))
+        else:
+            for btn in cloud_btns:
+                btn.pack_forget()
+        # Subscribe sits left of Manage, but only when cloud + no key yet.
+        self._sync_subscribe_visible()
+
+    def _sync_subscribe_visible(self, *_args) -> None:
+        """Show Subscribe only in cloud mode with no license key yet — an entered
+        key means the user is already a subscriber, so hide the prompt to buy."""
+        cloud = self._sv["inference_mode"].get() == _MODE_CLOUD
+        has_key = bool(self._sv["license_key"].get().strip())
+        if cloud and not has_key:
+            self._subscribe_btn.pack(side="left", padx=(6, 0),
+                                     before=self._manage_btn)
         else:
             self._subscribe_btn.pack_forget()
-            self._donate_btn.pack_forget()
-            self._manage_btn.pack_forget()
 
     def _set_field_visible(self, key: str, visible: bool) -> None:
         lbl, w = self._field_widgets[key]
@@ -391,24 +484,23 @@ class WatcherGUI:
             lbl.grid_remove()
             w.grid_remove()
 
-    def _open_billing(self, path: str, payload: dict, success_msg: str,
+    def _open_billing(self, path: str, body: dict, success_msg: str,
                       no_sub_msg: str) -> None:
-        """POST {email, ...} to the proxy and open the returned hosted URL."""
+        """POST `body` to the proxy `path` and open the returned hosted URL."""
         proxy = self._sv["proxy_url"].get().strip().rstrip("/")
-        email = self._sv["subscription_email"].get().strip()
-        if not proxy or not email:
-            self._append_log("Enter your Service URL and Subscription Email first.")
+        if not proxy:
+            self._append_log("Enter your Service URL first.")
             return
         req = urllib.request.Request(
             f"{proxy}{path}",
-            data=json.dumps({"email": email, **payload}).encode(),
+            data=json.dumps(body).encode(),
             headers={"Content-Type": "application/json", "User-Agent": "ArmaWatcher/1.0"},
         )
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 url = json.loads(resp.read())["url"]
         except urllib.error.HTTPError as e:
-            if e.code in (402, 403):
+            if e.code in (400, 402, 403):
                 self._append_log(no_sub_msg)
             else:
                 self._append_log(f"Could not reach billing service (error {e.code}).")
@@ -420,17 +512,172 @@ class WatcherGUI:
         self._append_log(success_msg)
 
     def _open_portal(self) -> None:
+        """Manage billing — gated by the license key (not the email)."""
+        key = self._sv["license_key"].get().strip()
+        if not key:
+            self._append_log("Enter your License Key first.")
+            return
         self._open_billing(
-            "/portal", {},
+            "/portal", {"license_key": key},
             "Opened subscription management in your browser.",
-            "No active subscription found for that email.",
+            "No active subscription found for that license key.",
         )
 
+    def _subscribe(self) -> None:
+        """Gate checkout behind the Terms of Service & Privacy consent dialog."""
+        self._show_legal_consent(on_accept=lambda: self._open_checkout("sub"))
+
+    def _show_legal_consent(self, on_accept) -> tk.Toplevel:
+        """Show TOS + privacy; call on_accept only after the user agrees."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Terms of Service & Privacy Policy")
+        dlg.configure(bg=BG)
+        dlg.transient(self.root)
+        dlg.resizable(False, True)
+        dlg.minsize(540, 560)
+
+        def _accept() -> None:
+            dlg.destroy()
+            on_accept()
+
+        def _cancel() -> None:
+            dlg.destroy()
+            self._append_log("Subscription cancelled — terms not accepted.")
+
+        outer = tk.Frame(dlg, bg=BG)
+        outer.pack(fill="both", expand=True, padx=16, pady=14)
+
+        tk.Label(outer, text="Before you subscribe", bg=BG, fg=GOLD,
+                 font=(self._hw_font, 18)).pack(anchor="w")
+        tk.Label(outer,
+                 text="Cloud mode sends desktop screenshots off your machine. "
+                      "Please read and accept the terms below.",
+                 bg=BG, fg=TEXT_DIM, font=("Segoe UI", 9),
+                 wraplength=500, justify="left").pack(anchor="w", pady=(2, 10))
+
+        text_border = tk.Frame(outer, bg=BORDER)
+        text_border.pack(fill="both", expand=True)
+        txt = tk.Text(text_border, height=16, wrap="word", bg=SURFACE, fg=TEXT,
+                      font=("Segoe UI", 9), borderwidth=0, highlightthickness=0,
+                      padx=12, pady=10, cursor="arrow")
+        sb = ttk.Scrollbar(text_border, command=txt.yview)
+        txt.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        txt.pack(side="left", fill="both", expand=True, padx=1, pady=1)
+
+        txt.tag_configure("h", foreground=GOLD, font=("Segoe UI", 11, "bold"),
+                          spacing1=10, spacing3=4)
+        txt.tag_configure("link", foreground=GOLD, underline=True)
+
+        txt.insert("end", "Terms of Service\n", "h")
+        txt.insert("end", TERMS_TEXT + "\n")
+        txt.insert("end", "Privacy Policy\n", "h")
+        txt.insert("end", PRIVACY_TEXT + "\n")
+        self._insert_legal_links(txt)
+        txt.config(state="disabled")
+
+        self._legal_agree_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            outer,
+            text="I have read and agree to the Terms of Service and Privacy Policy.",
+            variable=self._legal_agree_var,
+            command=self._sync_legal_agree_state,
+        ).pack(anchor="w", pady=(10, 8))
+
+        btns = tk.Frame(outer, bg=BG)
+        btns.pack(fill="x")
+        self._legal_agree_btn = ttk.Button(
+            btns, text="I Agree — Continue to Checkout", style="Gold.TButton",
+            state="disabled", command=_accept)
+        self._legal_agree_btn.pack(side="right")
+        ttk.Button(btns, text="Cancel", command=_cancel).pack(side="right", padx=(0, 8))
+
+        dlg.protocol("WM_DELETE_WINDOW", _cancel)
+        self._legal_dialog = dlg
+        self._legal_accept = _accept
+        self._legal_cancel = _cancel
+        try:
+            dlg.grab_set()
+        except tk.TclError:
+            pass
+        return dlg
+
+    def _sync_legal_agree_state(self) -> None:
+        """Enable the agree button only once the consent box is checked."""
+        ok = self._legal_agree_var.get()
+        self._legal_agree_btn.config(state="normal" if ok else "disabled")
+
+    def _insert_legal_links(self, txt: tk.Text) -> None:
+        """Append clickable links to the referenced third-party policies."""
+        txt.insert("end", "Referenced policies\n", "h")
+        for label, url in (
+            ("DigitalOcean serverless inference Acceptable Use Policy", LEGAL_DO_AUP),
+            ("DigitalOcean Privacy Policy", LEGAL_DO_PRIVACY),
+            ("Stripe Privacy Policy", LEGAL_STRIPE_PRIVACY),
+        ):
+            txt.insert("end", "• ")
+            start = txt.index("end-1c")
+            txt.insert("end", label, "link")
+            tag = f"link::{url}"
+            txt.tag_add(tag, start, txt.index("end-1c"))
+            txt.tag_bind(tag, "<Button-1>", lambda _e, u=url: webbrowser.open(u))
+            txt.tag_bind(tag, "<Enter>", lambda _e: txt.config(cursor="hand2"))
+            txt.tag_bind(tag, "<Leave>", lambda _e: txt.config(cursor="arrow"))
+            txt.insert("end", "\n")
+
+    def _open_tip(self) -> None:
+        """Open the one-time Stripe Payment Link — no account, email, Service URL,
+        or server round-trip needed, so it works in local (free) mode too."""
+        webbrowser.open(_tip_link())
+        self._append_log("Opened the tip page in your browser — thank you!")
+
     def _open_checkout(self, kind: str) -> None:
+        """Start checkout — Stripe needs the email to create the customer."""
+        email = self._sv["subscription_email"].get().strip()
+        if not email:
+            self._append_log("Enter your Subscription Email first.")
+            return
         self._open_billing(
-            "/checkout", {"kind": kind},
-            "Opened Stripe checkout in your browser.",
+            "/checkout", {"email": email, "kind": kind},
+            "Opened Stripe checkout in your browser. After a successful checkout "
+            "you'll receive an email with a license key — copy and paste it into "
+            "the License Key field above.",
             "Checkout is unavailable for that email.",
+        )
+
+    def _toggle_key_visible(self) -> None:
+        """Reveal/mask the License Key field so it can be copied to another PC."""
+        _lbl, w = self._field_widgets["license_key"]
+        revealing = w.cget("show") != ""
+        w.configure(show="" if revealing else "•")
+        self._show_key_btn.configure(text="Hide Key" if revealing else "Show Key")
+
+    def _recover_key(self) -> None:
+        """Ask the server to email a fresh license key to the purchase email.
+
+        The new key REPLACES the old one, so other machines must re-paste it.
+        Always reports success — the server never reveals whether an email is a
+        subscriber.
+        """
+        proxy = self._sv["proxy_url"].get().strip().rstrip("/")
+        email = self._sv["subscription_email"].get().strip()
+        if not proxy or not email:
+            self._append_log("Enter your Service URL and Subscription Email first.")
+            return
+        req = urllib.request.Request(
+            f"{proxy}/recover",
+            data=json.dumps({"email": email}).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": "ArmaWatcher/1.0"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15):
+                pass
+        except Exception as e:
+            self._append_log(f"Could not reach recovery service: {e}")
+            return
+        self._append_log(
+            "If that email has an active subscription, a new license key is on "
+            "its way. It replaces any old key — paste it above when it arrives."
         )
 
     # ── Watcher control ──────────────────────────────────────────────────────
@@ -441,9 +688,9 @@ class WatcherGUI:
         self._save_settings()
         cfg = cfg_mod.load()
         if cfg.get("inference_mode") == "cloud" and (
-            not cfg.get("proxy_url") or not cfg.get("subscription_email")
+            not cfg.get("proxy_url") or not cfg.get("license_key")
         ):
-            self._append_log("Cloud mode needs a Service URL and Subscription Email.")
+            self._append_log("Cloud mode needs a Service URL and License Key.")
             return
         self._watcher = ArmaWatcher(
             monitor_index=cfg.get("monitor"),
@@ -455,7 +702,7 @@ class WatcherGUI:
             log_callback=self._log_q.put,
             inference_mode=cfg.get("inference_mode", "local"),
             proxy_url=cfg.get("proxy_url"),
-            subscription_email=cfg.get("subscription_email"),
+            license_key=cfg.get("license_key"),
         )
         self._thread = threading.Thread(target=self._run_watcher, daemon=True)
         self._thread.start()

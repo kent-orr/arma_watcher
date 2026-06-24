@@ -168,14 +168,14 @@ class CloudRateLimitError(RuntimeError):
 class CloudInference:
     """Vision inference via the subscription proxy (separate repo).
 
-    Stores the purchase email, exchanges it for a short-lived opaque session
+    Stores the license key, exchanges it for a short-lived opaque session
     token at ``/token``, and posts OpenAI-style vision requests to
     ``/v1/chat/completions``. The proxy injects the model + DigitalOcean key.
     """
 
-    def __init__(self, proxy_url: str | None, subscription_email: str | None, model: str | None = None):
+    def __init__(self, proxy_url: str | None, license_key: str | None, model: str | None = None):
         self.proxy_url = (proxy_url or "").rstrip("/")
-        self.email = subscription_email
+        self.license_key = license_key
         self._token: str | None = None
 
     # -- HTTP helpers -------------------------------------------------------
@@ -185,16 +185,17 @@ class CloudInference:
             return self._token
         req = urllib.request.Request(
             f"{self.proxy_url}/token",
-            data=json.dumps({"email": self.email}).encode(),
+            data=json.dumps({"license_key": self.license_key}).encode(),
             headers={"Content-Type": "application/json", "User-Agent": "ArmaWatcher/1.0"},
         )
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body = json.loads(resp.read())
         except urllib.error.HTTPError as e:
-            if e.code in (402, 403):
+            if e.code in (400, 402, 403):
                 raise CloudAuthError(
-                    f"No active subscription for {self.email!r}. Check the email in Settings."
+                    "No active subscription for this license key. "
+                    "Check the license key in Settings."
                 ) from e
             raise ConnectionError(f"token endpoint error {e.code}") from e
         except urllib.error.URLError as e:
@@ -280,6 +281,6 @@ def make_inference(cfg: dict, model: str | None = None):
     if cfg.get("inference_mode") == "cloud":
         return CloudInference(
             proxy_url=cfg.get("proxy_url"),
-            subscription_email=cfg.get("subscription_email"),
+            license_key=cfg.get("license_key"),
         )
     return OllamaInference(model=model or cfg.get("model", MODEL))

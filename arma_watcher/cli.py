@@ -69,6 +69,6 @@ def main() -> None:
         model=model,
         inference_mode=saved.get("inference_mode", "local"),
         proxy_url=saved.get("proxy_url"),
-        subscription_email=saved.get("subscription_email"),
+        license_key=saved.get("license_key"),
     )
     watcher.run()

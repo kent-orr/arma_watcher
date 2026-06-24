@@ -14,6 +14,7 @@ _ENV_OVERRIDES = {
     "inference_mode": "ARMA_WATCHER_INFERENCE_MODE",
     "proxy_url": "ARMA_WATCHER_PROXY_URL",
     "subscription_email": "ARMA_WATCHER_SUBSCRIPTION_EMAIL",
+    "license_key": "ARMA_WATCHER_LICENSE_KEY",
 }
 
 DEFAULTS = {
@@ -27,7 +28,12 @@ DEFAULTS = {
     # Ollama; "cloud" routes screenshots through the subscription proxy.
     "inference_mode": "local",
     "proxy_url": None,           # e.g. https://my-service.example.com
-    "subscription_email": None,  # purchase email, exchanged for a session token
+    # The secret that grants cloud inference: emailed on checkout, exchanged for
+    # a short-lived session token at /token. Email no longer grants access.
+    "license_key": None,
+    # Purchase email — used only to start checkout and to recover a lost key
+    # (POST /recover). It is NOT a credential on its own.
+    "subscription_email": None,
 }
 
 _MODELS = [

@@ -93,7 +93,7 @@ class ArmaWatcher:
         log_callback: Callable[[str], None] | None = None,
         inference_mode: str = "local",
         proxy_url: str | None = None,
-        subscription_email: str | None = None,
+        license_key: str | None = None,
     ):
         self.monitor_index = monitor_index
         self.queue_interval = queue_interval
@@ -104,7 +104,7 @@ class ArmaWatcher:
         self.log_callback = log_callback
         self.inference_mode = inference_mode
         self.proxy_url = proxy_url
-        self.subscription_email = subscription_email
+        self.license_key = license_key
         self.server_name: str | None = None
         self.history: list[QueueEntry] = []
         self.message_plan: MessagePlan | None = None
@@ -132,8 +132,8 @@ class ArmaWatcher:
             else:
                 self._log("Discord webhook FAILED — check URL in config.")
         if self.inference_mode == "cloud":
-            if not self.proxy_url or not self.subscription_email:
-                self._log("Cloud mode needs a proxy URL and subscription email — set them in Settings.")
+            if not self.proxy_url or not self.license_key:
+                self._log("Cloud mode needs a proxy URL and license key — set them in Settings.")
                 return
             self._log("Cloud inference mode — using subscription service.")
 
@@ -228,14 +228,14 @@ class ArmaWatcher:
         """Build (and cache) the inference backend for the configured mode.
 
         Caching keeps the cloud backend's session token alive across polls
-        instead of re-exchanging the email on every call.
+        instead of re-exchanging the license key on every call.
         """
         if self._inference is None:
             self._inference = make_inference(
                 {
                     "inference_mode": self.inference_mode,
                     "proxy_url": self.proxy_url,
-                    "subscription_email": self.subscription_email,
+                    "license_key": self.license_key,
                     "model": self.model,
                 },
                 model=self.model,
