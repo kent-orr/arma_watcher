@@ -7,12 +7,24 @@ import subprocess
 
 CONFIG_PATH = pathlib.Path.home() / ".arma_watcher" / "config.json"
 
+# The cloud inference proxy is a fixed deployment — users never enter it. The
+# dev launcher (dev.ps1) can still point the client at a local server by setting
+# ARMA_WATCHER_PROXY_URL (see service_url()).
+SERVICE_URL = "https://seal-app-spckf.ondigitalocean.app/"
+
+
+def service_url() -> str:
+    """The cloud proxy URL. Hardcoded for end users; ARMA_WATCHER_PROXY_URL
+    overrides it for local-server dev/integration testing."""
+    return os.environ.get("ARMA_WATCHER_PROXY_URL") or SERVICE_URL
+
+
 # Env vars that override the saved config at load time. Used by the dev launcher
 # (dev.ps1) to point the GUI at a local arma_watcher_server for integration
-# testing without editing — or persisting anything to — config.json.
+# testing without editing — or persisting anything to — config.json. The proxy
+# URL is handled separately by service_url() since it's no longer a config field.
 _ENV_OVERRIDES = {
     "inference_mode": "ARMA_WATCHER_INFERENCE_MODE",
-    "proxy_url": "ARMA_WATCHER_PROXY_URL",
     "subscription_email": "ARMA_WATCHER_SUBSCRIPTION_EMAIL",
     "license_key": "ARMA_WATCHER_LICENSE_KEY",
 }
@@ -27,7 +39,6 @@ DEFAULTS = {
     # Inference backend: "local" runs the model on the user's own VRAM via
     # Ollama; "cloud" routes screenshots through the subscription proxy.
     "inference_mode": "local",
-    "proxy_url": None,           # e.g. https://my-service.example.com
     # The secret that grants cloud inference: emailed on checkout, exchanged for
     # a short-lived session token at /token. Email no longer grants access.
     "license_key": None,

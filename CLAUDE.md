@@ -58,6 +58,11 @@ to `{app}\launchers` (matching layout) and self-update refreshes the whole folde
 - **State machine** (`watcher.py`, `WatcherState`): `SEARCHING_ARMA` → scans monitors
   for Arma; `SEARCHING_QUEUE` → watches for a queue screen; `IN_QUEUE` → polls position
   every `queue_interval`s; `IN_GAME` → terminal, unloads model + sends final ping.
+- **Give-up conditions** (set `_stop_reason`, then `stop()`): scanning bails after
+  `_MAX_ARMA_ATTEMPTS` (5) fruitless monitor sweeps with an "Arma not found" message;
+  once the queue hits the front (position ≤ 1) the run ends after
+  `_FRONT_OF_QUEUE_TIMEOUT_S` (15 min) on the assumption the in-game transition was
+  missed. `run()`'s tail logs `_stop_reason` instead of the bare "Stopped.".
 - **Inference is pluggable**: `OllamaInference` and `CloudInference` expose the *same*
   three methods — `is_arma()`, `get_screen_state()`, `run()` — plus `unload()`.
   `make_inference(cfg)` picks one by `inference_mode`. Keep the interfaces identical;
@@ -97,11 +102,13 @@ to `{app}\launchers` (matching layout) and self-update refreshes the whole folde
 
 `~/.arma_watcher/config.json` (see `DEFAULTS` in `config.py`). Never written by tests.
 The cloud credential is `license_key`; `subscription_email` is kept only for checkout +
-recovery. Four env vars override config at load time **without persisting** — used by
-`dev.ps1` to point the GUI at a local server: `ARMA_WATCHER_INFERENCE_MODE`,
-`ARMA_WATCHER_PROXY_URL`, `ARMA_WATCHER_SUBSCRIPTION_EMAIL`, `ARMA_WATCHER_LICENSE_KEY`
-(dev default `lk_dev_local`, matching the server seed). `config.save()` is careful
-not to bake an active override into the file.
+recovery. The proxy URL is **not** a config field — it's the hardcoded `config.SERVICE_URL`
+(read everywhere via `config.service_url()`), since users never enter it. Three env vars
+override config at load time **without persisting** — used by `dev.ps1`:
+`ARMA_WATCHER_INFERENCE_MODE`, `ARMA_WATCHER_SUBSCRIPTION_EMAIL`, `ARMA_WATCHER_LICENSE_KEY`
+(dev default `lk_dev_local`, matching the server seed). `config.save()` is careful not to
+bake an active override into the file. Separately, `ARMA_WATCHER_PROXY_URL` overrides
+`service_url()` so `dev.ps1` can point the client at a local server.
 
 ## Dev & testing
 

@@ -63,6 +63,17 @@ class MessagePlan:
     messages: list[str]      # one message per threshold, same order
 
 
+# Give up scanning for Arma after this many full monitor sweeps — if the game
+# isn't up yet, retrying forever just burns the user's GPU/credits silently.
+_MAX_ARMA_ATTEMPTS = 5
+
+# Once the queue reaches the front (position 1), the game normally loads within a
+# minute or two. If we sit at the front this long without ever detecting the
+# in-game screen, the user is almost certainly in but we missed the transition —
+# stop instead of polling indefinitely.
+_FRONT_OF_QUEUE_TIMEOUT_S = 15 * 60
+
+
 _MILESTONES = [
     (30, "Still waiting — 30 to go."),
     (20, "Getting closer — 20 to go."),
@@ -110,6 +121,9 @@ class ArmaWatcher:
         self.message_plan: MessagePlan | None = None
         self._notified_thresholds: set[int] = set()
         self._inference = None
+        self._arma_attempts = 0
+        self._front_of_queue_at: datetime | None = None
+        self._stop_reason: str | None = None
         self._stop = threading.Event()
         self.state = (
             WatcherState.SEARCHING_QUEUE
@@ -142,6 +156,9 @@ class ArmaWatcher:
                 if self.inference_mode != "cloud":
                     self._infer_call(lambda: ensure_model(self.model, self._log))
                 while self.state != WatcherState.IN_GAME and not self._stop.is_set():
+                    if self._front_of_queue_timed_out():
+                        self._end_front_of_queue_timeout()
+                        break
                     if self.state == WatcherState.SEARCHING_ARMA:
                         self._step_searching_arma()
                     elif self.state == WatcherState.SEARCHING_QUEUE:
@@ -155,6 +172,8 @@ class ArmaWatcher:
                 self._log("You're in the game! LLM unloaded from VRAM.")
                 if self.discord_url:
                     _notify_discord(self.discord_url, f"{self._mention}You're in! Get on the server.")
+            elif self._stop_reason:
+                self._log(self._stop_reason)
             else:
                 self._log("Stopped.")
         except CloudAuthError as e:
@@ -174,7 +193,11 @@ class ArmaWatcher:
     # ------------------------------------------------------------------
 
     def _step_searching_arma(self) -> None:
-        self._log("Scanning monitors for Arma Reforger...")
+        self._arma_attempts += 1
+        self._log(
+            f"Scanning monitors for Arma Reforger "
+            f"(attempt {self._arma_attempts}/{_MAX_ARMA_ATTEMPTS})..."
+        )
         inference = self._make_inference()
         for i in range(1, len(list_monitors())):
             if self._infer_call(lambda i=i: inference.is_arma(capture_to_bytes(i))):
@@ -182,6 +205,13 @@ class ArmaWatcher:
                 self.state = WatcherState.SEARCHING_QUEUE
                 self._log(f"Arma Reforger detected on monitor {i}. Waiting for queue...")
                 return
+        if self._arma_attempts >= _MAX_ARMA_ATTEMPTS:
+            self._stop_reason = (
+                f"Couldn't find Arma Reforger after {_MAX_ARMA_ATTEMPTS} attempts. "
+                "Make sure the game is running and on screen, then start the watcher again."
+            )
+            self.stop()
+            return
         self._stop.wait(self.detect_interval)
 
     def _step_searching_queue(self) -> None:
@@ -283,7 +313,29 @@ class ArmaWatcher:
             raise _WatcherStopped
 
     def _record(self, position: int) -> None:
-        self.history.append(QueueEntry(datetime.now(), position))
+        now = datetime.now()
+        self.history.append(QueueEntry(now, position))
+        # Start the front-of-queue clock the first time we reach the front.
+        if position <= 1 and self._front_of_queue_at is None:
+            self._front_of_queue_at = now
+
+    def _front_of_queue_timed_out(self) -> bool:
+        if self._front_of_queue_at is None:
+            return False
+        elapsed = (datetime.now() - self._front_of_queue_at).total_seconds()
+        return elapsed >= _FRONT_OF_QUEUE_TIMEOUT_S
+
+    def _end_front_of_queue_timeout(self) -> None:
+        self._stop_reason = (
+            "You've been at the front of the queue for over 15 minutes — "
+            "you're almost certainly in the game now. Stopping the watcher."
+        )
+        if self.discord_url:
+            _notify_discord(
+                self.discord_url,
+                f"{self._mention}You're likely in the game now — the watcher is stopping.",
+            )
+        self.stop()
 
     def _avg_rate(self) -> float | None:
         """Positions moved per minute, calculated from first and last history entries."""

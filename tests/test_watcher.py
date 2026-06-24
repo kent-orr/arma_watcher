@@ -5,12 +5,20 @@ State-init and rate-calculation tests are pure unit tests (no ollama, no display
 """
 import threading
 import time
+import types
 from datetime import datetime, timedelta
 
 import pytest
 
 from arma_watcher.inference import CloudRateLimitError
-from arma_watcher.watcher import ArmaWatcher, QueueEntry, WatcherState, _WatcherStopped
+from arma_watcher.watcher import (
+    _FRONT_OF_QUEUE_TIMEOUT_S,
+    _MAX_ARMA_ATTEMPTS,
+    ArmaWatcher,
+    QueueEntry,
+    WatcherState,
+    _WatcherStopped,
+)
 
 
 def _history(pairs: list[tuple[int, float]]) -> list[QueueEntry]:
@@ -114,6 +122,84 @@ class TestArmaWatcherRateCalc:
 # ---------------------------------------------------------------------------
 # Interruptible retry backoff (Stop must not block on the 60s rate-limit wait)
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Give up scanning for Arma after a fixed number of attempts (no backoff loop)
+# ---------------------------------------------------------------------------
+
+
+class TestArmaDetectionGiveUp:
+    def _watcher(self, monkeypatch, *, found: bool):
+        # SEARCHING_ARMA (no monitor), zero detect interval so retries don't sleep.
+        w = ArmaWatcher(detect_interval=0)
+        w._inference = types.SimpleNamespace(is_arma=lambda _b: found)
+        monkeypatch.setattr("arma_watcher.watcher.list_monitors", lambda: [0, 1, 2])
+        monkeypatch.setattr("arma_watcher.watcher.capture_to_bytes", lambda _i: b"")
+        return w
+
+    def test_gives_up_after_max_attempts(self, monkeypatch):
+        w = self._watcher(monkeypatch, found=False)
+        for _ in range(_MAX_ARMA_ATTEMPTS):
+            w._step_searching_arma()
+        assert w._stop.is_set()
+        assert w._stop_reason is not None
+        assert "Couldn't find Arma" in w._stop_reason
+
+    def test_does_not_give_up_before_max(self, monkeypatch):
+        w = self._watcher(monkeypatch, found=False)
+        for _ in range(_MAX_ARMA_ATTEMPTS - 1):
+            w._step_searching_arma()
+        assert not w._stop.is_set()
+        assert w._stop_reason is None
+
+    def test_found_arma_advances_without_stopping(self, monkeypatch):
+        w = self._watcher(monkeypatch, found=True)
+        w._step_searching_arma()
+        assert w.state == WatcherState.SEARCHING_QUEUE
+        assert not w._stop.is_set()
+        assert w.monitor_index == 1
+
+
+# ---------------------------------------------------------------------------
+# Front-of-queue timeout — assume in-game if stuck at the front too long
+# ---------------------------------------------------------------------------
+
+
+class TestFrontOfQueueTimeout:
+    def test_record_starts_front_clock_at_position_one(self):
+        w = ArmaWatcher(monitor_index=1)
+        w._record(5)
+        assert w._front_of_queue_at is None
+        w._record(1)
+        assert w._front_of_queue_at is not None
+
+    def test_record_front_clock_set_only_once(self):
+        w = ArmaWatcher(monitor_index=1)
+        w._record(1)
+        first = w._front_of_queue_at
+        w._record(0)  # position 0 also counts as the front, but clock stays put
+        assert w._front_of_queue_at == first
+
+    def test_not_timed_out_before_reaching_front(self):
+        assert ArmaWatcher(monitor_index=1)._front_of_queue_timed_out() is False
+
+    def test_not_timed_out_within_window(self):
+        w = ArmaWatcher(monitor_index=1)
+        w._front_of_queue_at = datetime.now() - timedelta(seconds=_FRONT_OF_QUEUE_TIMEOUT_S - 60)
+        assert w._front_of_queue_timed_out() is False
+
+    def test_timed_out_after_window(self):
+        w = ArmaWatcher(monitor_index=1)
+        w._front_of_queue_at = datetime.now() - timedelta(seconds=_FRONT_OF_QUEUE_TIMEOUT_S + 60)
+        assert w._front_of_queue_timed_out() is True
+
+    def test_end_timeout_stops_with_reason(self):
+        w = ArmaWatcher(monitor_index=1)
+        w._end_front_of_queue_timeout()
+        assert w._stop.is_set()
+        assert w._stop_reason is not None
+        assert "front of the queue" in w._stop_reason
 
 
 class TestArmaWatcherBackoff:

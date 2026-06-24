@@ -68,7 +68,7 @@ def main() -> None:
         discord_user_id=discord_user_id,
         model=model,
         inference_mode=saved.get("inference_mode", "local"),
-        proxy_url=saved.get("proxy_url"),
+        proxy_url=cfg_mod.service_url(),
         license_key=saved.get("license_key"),
     )
     watcher.run()

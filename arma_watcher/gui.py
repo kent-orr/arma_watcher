@@ -323,7 +323,6 @@ class WatcherGUI:
             ("discord_webhook",    "Discord Webhook",    "entry",   {}),
             ("discord_user_id",    "Discord User ID",    "entry",   {}),
             ("model",              "Model",              "combo",   {"values": _MODELS, "state": "readonly", "width": 18}),
-            ("proxy_url",          "Service URL",        "entry",   {}),
             ("license_key",        "License Key",        "entry",   {"show": "•"}),
             ("subscription_email", "Subscription Email", "entry",   {}),
             ("monitor",            "Monitor",            "combo",   {"values": ["Auto", "1", "2", "3", "4", "5"], "width": 8}),
@@ -423,7 +422,6 @@ class WatcherGUI:
             self._sv["discord_webhook"].set(cfg.get("discord_webhook") or "")
             self._sv["discord_user_id"].set(cfg.get("discord_user_id") or "")
             self._sv["model"].set(cfg.get("model", "qwen3.5:9b"))
-            self._sv["proxy_url"].set(cfg.get("proxy_url") or "")
             self._sv["license_key"].set(cfg.get("license_key") or "")
             self._sv["subscription_email"].set(cfg.get("subscription_email") or "")
             m = cfg.get("monitor")
@@ -447,7 +445,6 @@ class WatcherGUI:
         cfg["discord_webhook"] = self._sv["discord_webhook"].get().strip() or None
         cfg["discord_user_id"] = self._sv["discord_user_id"].get().strip() or None
         cfg["model"] = self._sv["model"].get()
-        cfg["proxy_url"] = self._sv["proxy_url"].get().strip() or None
         cfg["license_key"] = self._sv["license_key"].get().strip() or None
         cfg["subscription_email"] = self._sv["subscription_email"].get().strip() or None
         raw_monitor = self._sv["monitor"].get().strip()
@@ -488,7 +485,7 @@ class WatcherGUI:
         # cloud meters/paces inference server-side, so they're hidden there.
         for key in ("model", "interval", "detect_interval"):
             self._set_field_visible(key, not cloud)
-        for key in ("proxy_url", "license_key", "subscription_email"):
+        for key in ("license_key", "subscription_email"):
             self._set_field_visible(key, cloud)
         cloud_btns = (self._manage_btn, self._show_key_btn, self._recover_btn)
         if cloud:
@@ -523,10 +520,7 @@ class WatcherGUI:
     def _open_billing(self, path: str, body: dict, success_msg: str,
                       no_sub_msg: str) -> None:
         """POST `body` to the proxy `path` and open the returned hosted URL."""
-        proxy = self._sv["proxy_url"].get().strip().rstrip("/")
-        if not proxy:
-            self._append_log("Enter your Service URL first.")
-            return
+        proxy = cfg_mod.service_url().rstrip("/")
         req = urllib.request.Request(
             f"{proxy}{path}",
             data=json.dumps(body).encode(),
@@ -695,10 +689,10 @@ class WatcherGUI:
         Always reports success — the server never reveals whether an email is a
         subscriber.
         """
-        proxy = self._sv["proxy_url"].get().strip().rstrip("/")
+        proxy = cfg_mod.service_url().rstrip("/")
         email = self._sv["subscription_email"].get().strip()
-        if not proxy or not email:
-            self._append_log("Enter your Service URL and Subscription Email first.")
+        if not email:
+            self._append_log("Enter your Subscription Email first.")
             return
         req = urllib.request.Request(
             f"{proxy}/recover",
@@ -722,10 +716,8 @@ class WatcherGUI:
         if self._thread and self._thread.is_alive():
             return
         cfg = self._persist_settings()
-        if cfg.get("inference_mode") == "cloud" and (
-            not cfg.get("proxy_url") or not cfg.get("license_key")
-        ):
-            self._append_log("Cloud mode needs a Service URL and License Key.")
+        if cfg.get("inference_mode") == "cloud" and not cfg.get("license_key"):
+            self._append_log("Cloud mode needs a License Key.")
             return
         self._watcher = ArmaWatcher(
             monitor_index=cfg.get("monitor"),
@@ -736,7 +728,7 @@ class WatcherGUI:
             model=cfg.get("model", "qwen3.5:9b"),
             log_callback=self._log_q.put,
             inference_mode=cfg.get("inference_mode", "local"),
-            proxy_url=cfg.get("proxy_url"),
+            proxy_url=cfg_mod.service_url(),
             license_key=cfg.get("license_key"),
         )
         self._thread = threading.Thread(target=self._run_watcher, daemon=True)
