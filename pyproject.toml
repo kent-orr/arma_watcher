@@ -1,6 +1,6 @@
 [project]
 name = "arma-watcher"
-version = "0.1.4"
+version = "0.1.5"
 description = "Watches your Arma Reforger screen with a local vision model and sends Discord notifications about your server queue position and ETA."
 readme = "README.md"
 license = "MIT"
