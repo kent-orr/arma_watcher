@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Checkout cancelled — Arma Watcher</title>
+<meta name="description" content="Your Arma Watcher checkout didn't complete. No charge was made — local mode is always free.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👁️</text></svg>">
+<style>
+  :root {
+    --bg: #111111;
+    --surface: #1c1c1c;
+    --surf2: #262626;
+    --gold: #c8a84b;
+    --gold-dim: #7a6530;
+    --text: #c8c8c8;
+    --text-dim: #707070;
+    --border: #2c2c2c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+  }
+  a { color: var(--gold); }
+  .card {
+    max-width: 540px;
+    width: 100%;
+    text-align: center;
+    background:
+      radial-gradient(600px 240px at 50% -20%, rgba(200,168,75,0.08), transparent 70%),
+      var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 48px 36px 40px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+  }
+  .badge {
+    width: 72px; height: 72px;
+    margin: 0 auto 24px;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    background: var(--surf2);
+    border: 1px solid var(--gold-dim);
+  }
+  .badge svg { width: 36px; height: 36px; color: var(--text-dim); }
+  .eyebrow {
+    letter-spacing: .28em;
+    text-transform: uppercase;
+    font-size: 12px;
+    color: var(--gold-dim);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-size: clamp(26px, 5vw, 34px);
+    font-weight: 800;
+    color: #f0f0f0;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+  }
+  h1 .gold { color: var(--gold); }
+  p.lead { margin: 18px auto 0; max-width: 440px; color: var(--text); font-size: 16px; }
+  p.sub { margin: 12px auto 0; max-width: 440px; color: var(--text-dim); font-size: 14px; }
+  .cta { margin-top: 32px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: linear-gradient(180deg, var(--gold), var(--gold-dim));
+    color: #1a1400;
+    font-weight: 700;
+    font-size: 15px;
+    text-decoration: none;
+    padding: 13px 26px;
+    border-radius: 10px;
+    border: 1px solid #e3c468;
+    transition: transform .12s ease;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn.ghost {
+    background: var(--surf2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .note { font-size: 13px; color: var(--text-dim); margin-top: 28px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </div>
+    <div class="eyebrow">Checkout cancelled</div>
+    <h1>No charge was <span class="gold">made.</span></h1>
+    <p class="lead">
+      Your checkout didn't go through — that's completely fine. Nothing was billed
+      to your card.
+    </p>
+    <p class="sub">
+      Remember: <b>local mode is always free.</b> Run the vision model on your own
+      GPU and you get the same Discord pings with no subscription at all. The cloud
+      plan is only for offloading the compute.
+    </p>
+
+    <div class="cta">
+      <a class="btn" href="./">Back to Arma Watcher</a>
+      <a class="btn ghost" href="https://github.com/kent-orr/arma_watcher">View on GitHub</a>
+    </div>
+
+    <p class="note">
+      Changed your mind? Reopen the app and start checkout again whenever you like.
+    </p>
+  </div>
+</body>
+</html>
