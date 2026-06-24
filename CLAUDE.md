@@ -20,12 +20,14 @@ Inference can run two ways, chosen by `inference_mode` in config:
   [Ollama](https://ollama.com). Screenshots never leave the machine. No account.
 - **`cloud`** (paid) — POSTs screenshots to `arma_watcher_server`, which holds the
   DigitalOcean inference key and only answers for an **active Stripe subscriber**.
-  This is the monetized path: the user stores their *purchase email*, the proxy
-  exchanges it for a short-lived opaque session token, inference is metered and
-  rate-limited server-side.
+  This is the monetized path: the user stores their *license key* (emailed at
+  checkout), the proxy exchanges it for a short-lived opaque session token, inference
+  is metered and rate-limited server-side. The *purchase email* is kept too, but only
+  to start checkout and to recover a lost key — it is not a credential.
 
-The client is deliberately ignorant of Stripe/DO — it only knows a proxy URL, an
-email, and the token dance. All payment/secrets live in the server.
+The client is deliberately ignorant of Stripe/DO — it only knows a proxy URL, a
+license key (+ email for checkout/recovery), and the token dance. All payment/secrets
+live in the server.
 
 ## Layout
 
@@ -78,21 +80,27 @@ to `{app}\launchers` (matching layout) and self-update refreshes the whole folde
 `CloudInference` (in `inference.py`) is the client side of the contract documented in
 `../arma_watcher_server/PLAN.md`. Key invariants — keep both repos in sync:
 
-- `POST /token` `{email}` → `{token, expires_at}`; `402/403` → `CloudAuthError`.
+- `POST /token` `{license_key}` → `{token, expires_at}`; `400/402/403` → `CloudAuthError`.
+  **Email no longer mints a token** — the license key (emailed at checkout) does.
 - `POST /v1/chat/completions` with `Authorization: Bearer <token>`, OpenAI-style body
   (`messages` with a `data:image/png;base64,...` image_url, `max_tokens`, `temperature`).
   The server **ignores** the client's model/prompt and injects its own — the client
   still sends a prompt + schema, but must not depend on them being honored verbatim.
-- Status codes the client depends on: `200` ok · `401/403` refresh token once then
-  `CloudAuthError` · `402` `CloudAuthError` · `429` `CloudRateLimitError` (back off) ·
-  `413` payload too large.
+- `POST /checkout` `{email, kind}` and `POST /recover` `{email}` use the email; `POST
+  /portal` `{license_key}` uses the key. The GUI's *Show Key* reveals the stored key
+  (copy to a new PC); *Email Me a New Key* calls `/recover` (rotates + emails a fresh key).
+- Status codes the client depends on: `200` ok · `400` license key missing →
+  `CloudAuthError` · `401/403` refresh token once then `CloudAuthError` · `402`
+  `CloudAuthError` · `429` `CloudRateLimitError` (back off) · `413` payload too large.
 
 ## Config
 
 `~/.arma_watcher/config.json` (see `DEFAULTS` in `config.py`). Never written by tests.
-Three env vars override config at load time **without persisting** — used by `dev.ps1`
-to point the GUI at a local server: `ARMA_WATCHER_INFERENCE_MODE`,
-`ARMA_WATCHER_PROXY_URL`, `ARMA_WATCHER_SUBSCRIPTION_EMAIL`. `config.save()` is careful
+The cloud credential is `license_key`; `subscription_email` is kept only for checkout +
+recovery. Four env vars override config at load time **without persisting** — used by
+`dev.ps1` to point the GUI at a local server: `ARMA_WATCHER_INFERENCE_MODE`,
+`ARMA_WATCHER_PROXY_URL`, `ARMA_WATCHER_SUBSCRIPTION_EMAIL`, `ARMA_WATCHER_LICENSE_KEY`
+(dev default `lk_dev_local`, matching the server seed). `config.save()` is careful
 not to bake an active override into the file.
 
 ## Dev & testing
@@ -135,8 +143,9 @@ uv run arma-watcher-gui       # GUI
 
 ## Gotchas
 
-- `.python-version` pins `3.14` while `pyproject.toml` says `requires-python >=3.11`;
-  uv fetches the pinned interpreter. Don't assume they agree.
+- `.python-version` pins `3.13` while `pyproject.toml` says `requires-python >=3.11`;
+  uv fetches the pinned interpreter. Don't assume they agree. (The pin is just a
+  chosen interpreter, not a hard requirement — bump it to any installed `>=3.11`.)
 - `updater.py` overwrites the listed `_UPDATE_FILES` in place from the GitHub zip and
   `sys.exit(0)`s after — it never touches `~/.arma_watcher/config.json`.
 - Monitor indices: `0` is the virtual all-monitors canvas; physical monitors are `1+`
