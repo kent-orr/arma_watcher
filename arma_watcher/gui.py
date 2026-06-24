@@ -36,6 +36,8 @@ _MODELS = ["qwen3.5:0.8b", "qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b"]
 _MODE_LOCAL = "Local (own VRAM)"
 _MODE_CLOUD = "Cloud (subscription)"
 _MODES = [_MODE_LOCAL, _MODE_CLOUD]
+# Debounce window for auto-saving settings as the user edits fields.
+_AUTOSAVE_MS = 400
 _FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "kent_handwriting.ttf")
 
 # One-time "Tip the Developer" Stripe Payment Link — a static hosted checkout URL
@@ -162,6 +164,8 @@ class WatcherGUI:
         self._watcher: ArmaWatcher | None = None
         self._thread: threading.Thread | None = None
         self._log_q: queue.Queue[str] = queue.Queue()
+        self._autosave_job: str | None = None
+        self._loading = False
 
         self._hw_font = self._load_handwriting_font()
         self._apply_theme()
@@ -343,21 +347,24 @@ class WatcherGUI:
 
         self._sv["inference_mode"].trace_add("write", self._on_mode_change)
         self._sv["license_key"].trace_add("write", self._sync_subscribe_visible)
+        # Auto-save: persist (debounced) whenever any setting changes, so there's
+        # no Save button to forget. The _loading guard skips the saves that the
+        # initial _load_settings population would otherwise trigger.
+        for sv in self._sv.values():
+            sv.trace_add("write", self._schedule_autosave)
 
-        save_row = tk.Frame(sb, bg=SURFACE)
-        save_row.pack(fill="x", pady=(10, 0))
-        ttk.Button(save_row, text="Save Settings",
-                   command=self._save_settings).pack(side="right")
+        actions_row = tk.Frame(sb, bg=SURFACE)
+        actions_row.pack(fill="x", pady=(10, 0))
         # Cloud-only billing buttons — packed/forgotten by _on_mode_change, and
         # Subscribe additionally hidden once a license key exists (see
         # _sync_subscribe_visible). Donate moved to the always-on tip button below.
-        self._subscribe_btn = ttk.Button(save_row, text="Subscribe",
+        self._subscribe_btn = ttk.Button(actions_row, text="Subscribe",
                                          command=self._subscribe)
-        self._manage_btn = ttk.Button(save_row, text="Manage Subscription",
+        self._manage_btn = ttk.Button(actions_row, text="Manage Subscription",
                                       command=self._open_portal)
-        self._show_key_btn = ttk.Button(save_row, text="Show Key",
+        self._show_key_btn = ttk.Button(actions_row, text="Show Key",
                                         command=self._toggle_key_visible)
-        self._recover_btn = ttk.Button(save_row, text="Email Me a New Key",
+        self._recover_btn = ttk.Button(actions_row, text="Email Me a New Key",
                                        command=self._recover_key)
 
         # ── Log card ─────────────────────────────────────────────────────────
@@ -405,23 +412,36 @@ class WatcherGUI:
     # ── Settings ─────────────────────────────────────────────────────────────
 
     def _load_settings(self) -> None:
-        cfg = cfg_mod.load()
-        self._sv["inference_mode"].set(
-            _MODE_CLOUD if cfg.get("inference_mode") == "cloud" else _MODE_LOCAL
-        )
-        self._sv["discord_webhook"].set(cfg.get("discord_webhook") or "")
-        self._sv["discord_user_id"].set(cfg.get("discord_user_id") or "")
-        self._sv["model"].set(cfg.get("model", "qwen3.5:9b"))
-        self._sv["proxy_url"].set(cfg.get("proxy_url") or "")
-        self._sv["license_key"].set(cfg.get("license_key") or "")
-        self._sv["subscription_email"].set(cfg.get("subscription_email") or "")
-        m = cfg.get("monitor")
-        self._sv["monitor"].set(str(m) if m is not None else "Auto")
-        self._sv["interval"].set(str(cfg.get("interval", 20)))
-        self._sv["detect_interval"].set(str(cfg.get("detect_interval", 5)))
-        self._on_mode_change()
+        # Suppress auto-save while populating fields from disk — these writes are
+        # the saved state, not user edits, so re-persisting them is pointless.
+        self._loading = True
+        try:
+            cfg = cfg_mod.load()
+            self._sv["inference_mode"].set(
+                _MODE_CLOUD if cfg.get("inference_mode") == "cloud" else _MODE_LOCAL
+            )
+            self._sv["discord_webhook"].set(cfg.get("discord_webhook") or "")
+            self._sv["discord_user_id"].set(cfg.get("discord_user_id") or "")
+            self._sv["model"].set(cfg.get("model", "qwen3.5:9b"))
+            self._sv["proxy_url"].set(cfg.get("proxy_url") or "")
+            self._sv["license_key"].set(cfg.get("license_key") or "")
+            self._sv["subscription_email"].set(cfg.get("subscription_email") or "")
+            m = cfg.get("monitor")
+            self._sv["monitor"].set(str(m) if m is not None else "Auto")
+            self._sv["interval"].set(str(cfg.get("interval", 20)))
+            self._sv["detect_interval"].set(str(cfg.get("detect_interval", 5)))
+            self._on_mode_change()
+        finally:
+            self._loading = False
 
-    def _save_settings(self) -> None:
+    def _persist_settings(self) -> dict:
+        """Write the current GUI field values to config.json and return them.
+
+        Returns the in-memory cfg (the user's explicit GUI choices). Callers like
+        _start must use this rather than cfg_mod.load(), which re-applies dev env
+        overrides (ARMA_WATCHER_INFERENCE_MODE etc.) and would resurrect cloud
+        mode even after the user switched back to Local.
+        """
         cfg = cfg_mod.load()
         cfg["inference_mode"] = "cloud" if self._sv["inference_mode"].get() == _MODE_CLOUD else "local"
         cfg["discord_webhook"] = self._sv["discord_webhook"].get().strip() or None
@@ -441,7 +461,23 @@ class WatcherGUI:
         except ValueError:
             cfg["detect_interval"] = 5
         cfg_mod.save(cfg)
-        self._append_log("Settings saved.")
+        return cfg
+
+    def _schedule_autosave(self, *_args) -> None:
+        """Debounced auto-save — persist shortly after the last field change so
+        rapid edits (e.g. typing a webhook URL) collapse into a single write."""
+        if self._loading:
+            return
+        if self._autosave_job is not None:
+            self.root.after_cancel(self._autosave_job)
+        self._autosave_job = self.root.after(_AUTOSAVE_MS, self._flush_autosave)
+
+    def _flush_autosave(self) -> None:
+        """Run any pending debounced save now (also called before the window closes)."""
+        if self._autosave_job is not None:
+            self.root.after_cancel(self._autosave_job)
+            self._autosave_job = None
+        self._persist_settings()
 
     # ── Inference mode (local vs cloud) ───────────────────────────────────────
 
@@ -685,8 +721,7 @@ class WatcherGUI:
     def _start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        self._save_settings()
-        cfg = cfg_mod.load()
+        cfg = self._persist_settings()
         if cfg.get("inference_mode") == "cloud" and (
             not cfg.get("proxy_url") or not cfg.get("license_key")
         ):
@@ -804,7 +839,9 @@ def main() -> None:
         except tk.TclError:
             pass  # .ico via iconbitmap is Windows-only; skip on other platforms
 
-    WatcherGUI(root)
+    app = WatcherGUI(root)
+    # Flush any pending debounced setting-save before the window closes.
+    root.protocol("WM_DELETE_WINDOW", lambda: (app._flush_autosave(), root.destroy()))
     root.mainloop()
 
 

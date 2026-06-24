@@ -11,6 +11,7 @@ These flow tests need a Tk display and skip automatically when none exists.
 Visibility is probed with winfo_manager() (== "" once pack_forget/grid_remove'd).
 """
 import tkinter as tk
+from tkinter import ttk
 
 import pytest
 
@@ -102,6 +103,102 @@ class TestIntervalVisibility:
         for key in ("interval", "detect_interval"):
             _lbl, w = app._field_widgets[key]
             assert _visible(w), f"{key} should be visible in local mode"
+
+
+class TestStartHonorsSelectedMode:
+    """Switching the GUI to Local must actually start a local watcher, even when a
+    dev env override (ARMA_WATCHER_INFERENCE_MODE=cloud, as dev.sh sets) is active.
+
+    Regression: _start re-loaded config via cfg_mod.load(), which re-applies the
+    env override and resurrected cloud mode — so a subscriber who switched back to
+    Local still pinged the proxy. _start must use the just-saved GUI values.
+    """
+
+    def test_switch_to_local_starts_local_watcher_despite_env_override(
+        self, tmp_path, monkeypatch
+    ):
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            pytest.skip("no display available for Tk")
+        root.withdraw()
+
+        # Dev/subscriber scenario: env forces cloud + a configured proxy/key.
+        monkeypatch.setattr(gui.cfg_mod, "CONFIG_PATH", tmp_path / "config.json")
+        monkeypatch.setenv("ARMA_WATCHER_INFERENCE_MODE", "cloud")
+        monkeypatch.setenv("ARMA_WATCHER_PROXY_URL", "http://localhost:5000")
+        monkeypatch.setenv("ARMA_WATCHER_LICENSE_KEY", "lk_dev_local")
+
+        captured = {}
+
+        class _FakeWatcher:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def run(self):
+                pass
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr(gui, "ArmaWatcher", _FakeWatcher)
+
+        try:
+            g = gui.WatcherGUI(root)
+            # GUI opened in cloud (env override); user switches back to Local.
+            g._sv["inference_mode"].set(_MODE_LOCAL)
+            g._start()
+            g._thread.join(timeout=2)
+        finally:
+            root.destroy()
+
+        assert captured["inference_mode"] == "local"
+
+
+class TestAutoSave:
+    """Settings persist on change (debounced) — there is no Save button."""
+
+    def test_changing_a_setting_persists_to_disk(self, tmp_path, monkeypatch):
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            pytest.skip("no display available for Tk")
+        root.withdraw()
+        monkeypatch.setattr(gui.cfg_mod, "CONFIG_PATH", tmp_path / "config.json")
+        try:
+            g = gui.WatcherGUI(root)
+            g._sv["discord_user_id"].set("123456789")
+            assert g._autosave_job is not None  # change scheduled a save
+            g._flush_autosave()                 # run it now instead of waiting
+            import json
+            saved = json.loads((tmp_path / "config.json").read_text())
+            assert saved["discord_user_id"] == "123456789"
+        finally:
+            root.destroy()
+
+    def test_loading_settings_does_not_write_or_schedule(self, tmp_path, monkeypatch):
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            pytest.skip("no display available for Tk")
+        root.withdraw()
+        monkeypatch.setattr(gui.cfg_mod, "CONFIG_PATH", tmp_path / "config.json")
+        try:
+            g = gui.WatcherGUI(root)
+            # Populating fields from disk during __init__ must not autosave.
+            assert g._autosave_job is None
+            assert not (tmp_path / "config.json").exists()
+        finally:
+            root.destroy()
+
+    def test_no_save_button(self, app):
+        # The Save Settings button has been replaced by auto-save.
+        labels = [
+            w.cget("text")
+            for w in app._subscribe_btn.master.winfo_children()
+            if isinstance(w, ttk.Button)
+        ]
+        assert "Save Settings" not in labels
 
 
 class TestCheckoutMessage:
