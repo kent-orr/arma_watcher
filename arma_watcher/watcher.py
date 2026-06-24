@@ -1,6 +1,5 @@
 import json
 import threading
-import time
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -38,6 +37,11 @@ def _notify_discord(url: str, msg: str) -> bool:
         print(f"[discord] webhook: {masked}")
         print(f"[discord] message attempted: {msg!r}")
         return False
+
+
+class _WatcherStopped(Exception):
+    """Internal signal: stop() was called mid-retry — unwind to the graceful
+    shutdown tail in run() instead of finishing the current backoff."""
 
 
 class WatcherState(Enum):
@@ -134,15 +138,18 @@ class ArmaWatcher:
             self._log("Cloud inference mode — using subscription service.")
 
         try:
-            if self.inference_mode != "cloud":
-                self._infer_call(lambda: ensure_model(self.model, self._log))
-            while self.state != WatcherState.IN_GAME and not self._stop.is_set():
-                if self.state == WatcherState.SEARCHING_ARMA:
-                    self._step_searching_arma()
-                elif self.state == WatcherState.SEARCHING_QUEUE:
-                    self._step_searching_queue()
-                elif self.state == WatcherState.IN_QUEUE:
-                    self._step_in_queue()
+            try:
+                if self.inference_mode != "cloud":
+                    self._infer_call(lambda: ensure_model(self.model, self._log))
+                while self.state != WatcherState.IN_GAME and not self._stop.is_set():
+                    if self.state == WatcherState.SEARCHING_ARMA:
+                        self._step_searching_arma()
+                    elif self.state == WatcherState.SEARCHING_QUEUE:
+                        self._step_searching_queue()
+                    elif self.state == WatcherState.IN_QUEUE:
+                        self._step_in_queue()
+            except _WatcherStopped:
+                pass  # stop() during a retry backoff — fall through to shutdown
             self._make_inference().unload()  # free VRAM (no-op in cloud mode)
             if self.state == WatcherState.IN_GAME:
                 self._log("You're in the game! LLM unloaded from VRAM.")
@@ -257,13 +264,23 @@ class ArmaWatcher:
                     f"Inference backend unavailable (Ollama stopped or proxy unreachable). "
                     f"Retrying in {_RETRY}s..."
                 )
-                time.sleep(_RETRY)
+                self._backoff(_RETRY)
             except ollama.ResponseError as e:
                 self._log(f"Ollama error ({e.status_code}): {e.error}. Retrying in {_RETRY}s...")
-                time.sleep(_RETRY)
+                self._backoff(_RETRY)
             except CloudRateLimitError:
                 self._log(f"Rate limited by subscription service. Backing off {_RATE_LIMIT_BACKOFF}s...")
-                time.sleep(_RATE_LIMIT_BACKOFF)
+                self._backoff(_RATE_LIMIT_BACKOFF)
+
+    def _backoff(self, seconds: float) -> None:
+        """Sleep between retries, but bail out the instant stop() is called.
+
+        A plain time.sleep() blocks run() from returning until the full backoff
+        elapses — most painfully the 60s rate-limit backoff, which made Stop
+        feel hung. Waiting on the stop event makes Stop take effect immediately.
+        """
+        if self._stop.wait(seconds):
+            raise _WatcherStopped
 
     def _record(self, position: int) -> None:
         self.history.append(QueueEntry(datetime.now(), position))

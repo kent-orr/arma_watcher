@@ -3,11 +3,14 @@ Tests for arma_watcher/watcher.py.
 
 State-init and rate-calculation tests are pure unit tests (no ollama, no display).
 """
+import threading
+import time
 from datetime import datetime, timedelta
 
 import pytest
 
-from arma_watcher.watcher import ArmaWatcher, QueueEntry, WatcherState
+from arma_watcher.inference import CloudRateLimitError
+from arma_watcher.watcher import ArmaWatcher, QueueEntry, WatcherState, _WatcherStopped
 
 
 def _history(pairs: list[tuple[int, float]]) -> list[QueueEntry]:
@@ -106,3 +109,37 @@ class TestArmaWatcherRateCalc:
         w = ArmaWatcher(monitor_index=1)
         w.history = _history([(5, 0), (10, 5)])
         assert w._predicted_minutes() is None
+
+
+# ---------------------------------------------------------------------------
+# Interruptible retry backoff (Stop must not block on the 60s rate-limit wait)
+# ---------------------------------------------------------------------------
+
+
+class TestArmaWatcherBackoff:
+    def test_backoff_returns_after_timeout_when_not_stopped(self):
+        w = ArmaWatcher(monitor_index=1)
+        start = time.monotonic()
+        assert w._backoff(0.02) is None
+        assert time.monotonic() - start < 1.0
+
+    def test_backoff_raises_immediately_when_already_stopped(self):
+        w = ArmaWatcher(monitor_index=1)
+        w.stop()
+        start = time.monotonic()
+        with pytest.raises(_WatcherStopped):
+            w._backoff(60)  # would block a full minute without the stop event
+        assert time.monotonic() - start < 1.0
+
+    def test_infer_call_aborts_rate_limit_backoff_on_stop(self):
+        """A 429 backoff must unwind the moment stop() is called, not after 60s."""
+        w = ArmaWatcher(monitor_index=1)
+
+        def always_rate_limited():
+            raise CloudRateLimitError("rate limited by inference proxy")
+
+        threading.Timer(0.05, w.stop).start()
+        start = time.monotonic()
+        with pytest.raises(_WatcherStopped):
+            w._infer_call(always_rate_limited)
+        assert time.monotonic() - start < 5.0
