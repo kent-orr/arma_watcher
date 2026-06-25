@@ -12,7 +12,16 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from arma_watcher.inference import MODEL, QUEUE_PROMPT, Inference, QueueInfo, Screen, ScreenState
+from arma_watcher.inference import (
+    CLOUD_MAX_EDGE,
+    MODEL,
+    QUEUE_PROMPT,
+    Inference,
+    QueueInfo,
+    Screen,
+    ScreenState,
+    _downscale_for_cloud,
+)
 
 _HERE = Path(__file__).parent
 
@@ -141,6 +150,38 @@ class TestQueueInfo:
     def test_server_name_must_be_str(self):
         with pytest.raises(Exception):
             QueueInfo(position=1, server_name=42)
+
+
+# ---------------------------------------------------------------------------
+# _downscale_for_cloud  (no ollama needed) — guards the cloud image-size fix
+# ---------------------------------------------------------------------------
+
+
+def _png_bytes(width: int, height: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), color=(30, 30, 30)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class TestDownscaleForCloud:
+    def test_oversized_image_is_capped_to_max_edge(self):
+        out = _downscale_for_cloud(_png_bytes(3840, 2160))
+        assert max(Image.open(io.BytesIO(out)).size) == CLOUD_MAX_EDGE
+
+    def test_aspect_ratio_is_preserved(self):
+        out = _downscale_for_cloud(_png_bytes(3840, 2160))
+        w, h = Image.open(io.BytesIO(out)).size
+        assert round(w / h, 2) == round(3840 / 2160, 2)
+
+    def test_output_is_jpeg(self):
+        assert Image.open(io.BytesIO(_downscale_for_cloud(_png_bytes(800, 600)))).format == "JPEG"
+
+    def test_small_image_is_not_upscaled(self):
+        out = _downscale_for_cloud(_png_bytes(640, 480))
+        assert Image.open(io.BytesIO(out)).size == (640, 480)
+
+    def test_undecodable_bytes_fall_back_to_input(self):
+        assert _downscale_for_cloud(b"not an image") == b"not an image"
 
 
 # ---------------------------------------------------------------------------

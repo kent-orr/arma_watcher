@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 import re
 import urllib.error
@@ -8,7 +9,15 @@ from enum import Enum
 
 import ollama
 from ollama import chat, generate
+from PIL import Image
 from pydantic import BaseModel
+
+# Cloud requests go over the wire to the proxy, then on to DigitalOcean, which
+# rejects oversized images. A full-res monitor PNG (multi-MB on 1440p/4K) is far
+# more than the vision model needs to read a queue number, so downscale the long
+# edge and re-encode as JPEG before sending. The local Ollama path is unaffected.
+CLOUD_MAX_EDGE = 1600
+CLOUD_JPEG_QUALITY = 85
 
 MODEL = "qwen3.5:9b"
 
@@ -138,6 +147,29 @@ def _parse(content: str) -> QueueInfo:
     return QueueInfo(position=position, server_name="")
 
 
+def _downscale_for_cloud(image_bytes: bytes) -> bytes:
+    """Shrink a screenshot to a cloud-friendly JPEG.
+
+    Caps the long edge at ``CLOUD_MAX_EDGE`` and re-encodes as JPEG so a full-res
+    monitor PNG doesn't blow past the proxy/DigitalOcean image-size limits. The
+    queue number stays legible at this size. Best-effort: if PIL can't decode the
+    bytes, fall back to a JPEG of the original (or the raw bytes as a last resort).
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img = img.convert("RGB")
+        longest = max(img.size)
+        if longest > CLOUD_MAX_EDGE:
+            scale = CLOUD_MAX_EDGE / longest
+            new_size = (round(img.width * scale), round(img.height * scale))
+            img = img.resize(new_size, Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=CLOUD_JPEG_QUALITY)
+        return buf.getvalue()
+    except Exception:
+        return image_bytes
+
+
 def _coerce_json(content: str) -> str:
     """Best-effort: return the substring spanning the first '{' to the last '}'.
 
@@ -262,13 +294,14 @@ class CloudInference:
             + " Respond ONLY with JSON matching this schema: "
             + json.dumps(schema)
         )
-        img_b64 = base64.b64encode(image_bytes).decode()
+        jpeg_bytes = _downscale_for_cloud(image_bytes)
+        img_b64 = base64.b64encode(jpeg_bytes).decode()
         data = json.dumps({
             "messages": [{
                 "role": "user",
                 "content": [
                     {"type": "text", "text": instruction},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
                 ],
             }],
             "max_tokens": 256,
