@@ -96,30 +96,29 @@ var
   ModelPage: TInputOptionWizardPage;
   LogPage: TWizardPage;
   LogMemo: TNewMemo;
-  ModelTags: array[0..4] of String;
+  ModelTags: array[0..2] of String;
   BootstrapStarted: Boolean;
 
 procedure InitializeWizard;
 begin
   // Order must match the radio buttons added below; 'none' = skip the download.
-  ModelTags[0] := 'qwen3.5:0.8b';
-  ModelTags[1] := 'qwen3.5:2b';
-  ModelTags[2] := 'qwen3.5:4b';
-  ModelTags[3] := 'qwen3.5:9b';
-  ModelTags[4] := 'none';
+  // These are the recommended models; any other Ollama model can be entered
+  // later in the app (the GUI's Model field accepts a free-text model name).
+  ModelTags[0] := 'qwen3.5:4b';
+  ModelTags[1] := 'qwen3.5:9b';
+  ModelTags[2] := 'none';
 
   ModelPage := CreateInputOptionPage(wpSelectTasks,
     'Choose a vision model',
     'Arma Watcher reads your screen with a local AI model.',
-    'Pick the model to download during setup. Bigger models are more accurate but'
-    + ' need more video memory (VRAM). You can change this later inside the app.',
+    'Pick a recommended model to download during setup. Bigger models are more'
+    + ' accurate but need more video memory (VRAM). You can change this later'
+    + ' inside the app - and enter any other Ollama model name there.',
     True, False);
-  ModelPage.Add('qwen3.5:0.8b   -   ~1.0 GB VRAM   (fastest, least accurate)');
-  ModelPage.Add('qwen3.5:2b     -   ~2.7 GB VRAM');
   ModelPage.Add('qwen3.5:4b     -   ~3.4 GB VRAM');
   ModelPage.Add('qwen3.5:9b     -   ~6.6 GB VRAM   (recommended)');
   ModelPage.Add('Don''t download a model now  -  I''ll choose one later in the app');
-  ModelPage.SelectedValueIndex := 3;
+  ModelPage.SelectedValueIndex := 1;
 
   // Custom page shown right after the file-copy step, where the bootstrap runs
   // and streams its output into a read-only memo.

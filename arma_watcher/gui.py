@@ -32,7 +32,10 @@ LOG_WARN = "#cc8800"
 LOG_POS  = "#66ff66"
 LOG_OK   = "#88ff88"
 
-_MODELS = ["qwen3.5:0.8b", "qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b"]
+# Recommended models offered as dropdown suggestions — sourced from config so
+# the list lives in one place. The Model field is a free-text combo, so users
+# can type any Ollama model name regardless of what's in this list.
+_MODELS = cfg_mod.RECOMMENDED_MODELS
 _MODE_LOCAL = "Local (own VRAM)"
 _MODE_CLOUD = "Cloud (subscription)"
 _MODES = [_MODE_LOCAL, _MODE_CLOUD]
@@ -297,14 +300,14 @@ class WatcherGUI:
         tk.Frame(si, bg=BORDER, height=1).pack(fill="x", pady=(10, 10))
 
         btn_row = tk.Frame(si, bg=SURFACE)
-        btn_row.pack(anchor="w")
-        self._start_btn = ttk.Button(btn_row, text="Start Watching", width=14,
+        btn_row.pack(fill="x")
+        self._start_btn = ttk.Button(btn_row, text="Start Watching",
                                       style="Gold.TButton", command=self._start)
-        self._start_btn.pack(side="left", padx=(0, 8))
-        self._stop_btn = ttk.Button(btn_row, text="Stop", width=8,
+        self._start_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self._stop_btn = ttk.Button(btn_row, text="Stop",
                                      style="Danger.TButton", command=self._stop,
                                      state="disabled")
-        self._stop_btn.pack(side="left")
+        self._stop_btn.pack(side="left", fill="x", expand=True)
 
         # ── Settings card ────────────────────────────────────────────────────
         settings_body = self._card(outer)
@@ -322,7 +325,7 @@ class WatcherGUI:
             ("inference_mode",     "Inference",          "combo",   {"values": _MODES, "state": "readonly", "width": 20}),
             ("discord_webhook",    "Discord Webhook",    "entry",   {}),
             ("discord_user_id",    "Discord User ID",    "entry",   {}),
-            ("model",              "Model",              "combo",   {"values": _MODELS, "state": "readonly", "width": 18}),
+            ("model",              "Model",              "combo",   {"values": _MODELS, "width": 22}),
             ("license_key",        "License Key",        "entry",   {"show": "•"}),
             ("subscription_email", "Subscription Email", "entry",   {}),
             ("monitor",            "Monitor",            "combo",   {"values": ["Auto", "1", "2", "3", "4", "5"], "width": 8}),

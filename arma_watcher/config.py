@@ -47,12 +47,18 @@ DEFAULTS = {
     "subscription_email": None,
 }
 
+# Curated models offered during setup and as the GUI's dropdown suggestions.
+# Users are NOT limited to these: setup accepts a typed model name and the GUI's
+# Model field is a free-text combo (see _pick_model and gui._MODELS). The VRAM
+# hints just guide the setup picker.
 _MODELS = [
-    ("qwen3.5:0.8b", "1.0 GB VRAM"),
-    ("qwen3.5:2b",   "2.7 GB VRAM"),
-    ("qwen3.5:4b",   "3.4 GB VRAM"),
-    ("qwen3.5:9b",   "6.6 GB VRAM  (recommended)"),
+    ("qwen3.5:4b", "3.4 GB VRAM"),
+    ("qwen3.5:9b", "6.6 GB VRAM  (recommended)"),
 ]
+
+# Just the model names — the GUI imports this for its suggestion dropdown so the
+# recommended list lives in exactly one place.
+RECOMMENDED_MODELS = [name for name, _vram in _MODELS]
 
 _PROMPTS = [
     ("discord_webhook", "Discord webhook URL", None),
@@ -130,18 +136,22 @@ def _ensure_ollama() -> None:
 
 
 def _pick_model() -> str:
-    print("  Select a model:\n")
+    print("  Select a recommended model, or type any Ollama model name:\n")
     for i, (name, vram) in enumerate(_MODELS, 1):
         print(f"    {i}) {name:<16} {vram}")
     print()
     default_idx = len(_MODELS)  # qwen3.5:9b
     while True:
-        raw = input(f"  Enter 1-{len(_MODELS)} [{default_idx}]: ").strip()
+        raw = input(f"  Enter 1-{len(_MODELS)} or a model name [{default_idx}]: ").strip()
         if not raw:
             return _MODELS[default_idx - 1][0]
-        if raw.isdigit() and 1 <= int(raw) <= len(_MODELS):
-            return _MODELS[int(raw) - 1][0]
-        print(f"  Please enter a number between 1 and {len(_MODELS)}.")
+        if raw.isdigit():
+            n = int(raw)
+            if 1 <= n <= len(_MODELS):
+                return _MODELS[n - 1][0]
+            print(f"  Please enter a number between 1 and {len(_MODELS)}, or a model name.")
+            continue
+        return raw  # any other text is treated as a custom Ollama model name
 
 
 def _pull_model(model: str) -> None:
