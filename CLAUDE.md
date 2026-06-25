@@ -72,6 +72,18 @@ to `{app}\launchers` (matching layout) and self-update refreshes the whole folde
   `ScreenState`, `_ArmaDetection`). Local Ollama enforces the JSON schema natively;
   cloud appends the schema to the prompt and `_coerce_json` trims stray prose before
   parsing. `_parse` has a regex fallback to salvage a bare integer position.
+  - `ScreenState` classifies the screen into a **closed-set `Screen` enum** (`splash`,
+    `main_menu`, `server_browser`, `in_queue`, `in_game`, `other`); `in_queue`/`in_game`
+    are **derived properties** of that enum, so the states are mutually exclusive by
+    construction and the watcher is untouched. The hard case the enum exists to nail is
+    `server_browser` vs `in_queue` — the queue is a modal drawn *on top of* the browser,
+    so the prompt gates `in_queue` on literally seeing the "waiting in the server queue"
+    dialog + position number. The leading `queue_dialog_visible` field is a deliberate
+    reasoning scaffold that stabilizes a lightweight model's choice — keep it.
+  - All inference calls decode **greedily** (`_GREEDY`, `temperature=0`): classification
+    is a deterministic task, so this is the single biggest reliability lever (it, not the
+    prompt wording, is what locked in correct labels on `minicpm-v4.5`). Don't reintroduce
+    default-temperature sampling on these calls.
 - **ETA**: `_avg_rate()` = positions moved / minutes elapsed across history;
   `_predicted_minutes()` = current position / rate. Notifications are milestone-gated
   (`_MILESTONES`) so Discord isn't spammed; milestones the queue starts below are skipped.

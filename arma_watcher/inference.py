@@ -4,12 +4,17 @@ import re
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from enum import Enum
 
 import ollama
 from ollama import chat, generate
 from pydantic import BaseModel
 
 MODEL = "qwen3.5:9b"
+
+# Vision classification/extraction is a deterministic task — decode greedily so the
+# same screenshot maps to the same answer instead of sampling Ollama's default temp.
+_GREEDY = {"temperature": 0}
 
 
 def _installed_models() -> set[str]:
@@ -48,17 +53,49 @@ QUEUE_PROMPT = (
 )
 
 DETECT_PROMPT = (
-    "Is this a screenshot of Arma Reforger (the game, its server browser, or its queue screen)? "
-    "Return true if yes, false if no."
+    "Is this a screenshot of Arma Reforger (the game, its server browser, or its queue "
+    "screen)? Return true ONLY if you can actually see recognizable Arma Reforger "
+    "content — the ARMA REFORGER logo, its menus, a server list, soldiers/military "
+    "vehicles, or the in-game HUD. Return false for anything else, including a blank, "
+    "featureless, or solid-colour image, the desktop, or an unrelated app."
 )
 
 SCREEN_STATE_PROMPT = (
-    "Analyze this Arma Reforger screenshot and determine the current state. "
-    "Set in_queue=true if a queue waiting screen is visible with a numbered position. "
-    "Set in_game=true if the player is in an active game session with HUD visible. "
-    "Set position to the integer queue position if in_queue, else 0. "
-    "Set server_name to the server name text if in_queue, else empty string."
+    "First set 'queue_dialog_visible': true ONLY if a popup/dialog box with the words "
+    "'waiting in the server queue' and a 'Position in queue:' number is actually visible "
+    "in the image; otherwise false. Do not set it true based on artwork, a soldier, a "
+    "logo, a server list, or a blank image.\n"
+    "Then classify this Arma Reforger screenshot into exactly one 'screen' from this "
+    "closed set. Decide the queue case FIRST, then fall back to the others:\n"
+    "- 'in_queue': choose this ONLY if you can literally read a popup/dialog box with the "
+    "words 'waiting in the server queue' AND a 'Position in queue:' line followed by a "
+    "number. If that exact dialog text and number are not clearly visible, it is NOT "
+    "in_queue — do not guess in_queue from artwork, soldiers, or a server list.\n"
+    "- 'in_game': a live match is being played — first/third-person gameplay world with a "
+    "HUD (compass, ammo, map), no menus or dialogs.\n"
+    "- 'server_browser': the Multiplayer screen showing a scrollable LIST of many servers "
+    "(rows of server names, scenarios, player counts, ping) with NO queue dialog on top.\n"
+    "- 'main_menu': the main menu with large tiles like Play, Multiplayer, Game Master, "
+    "Workshop, Scenarios, Settings. No server list, no queue dialog.\n"
+    "- 'splash': the startup/title/legal screen — a single piece of cinematic artwork "
+    "(e.g. a soldier and a vehicle) dominated by the big 'ARMA REFORGER' logo in the "
+    "centre, often with studio logos and small copyright/legal text, and NO menu tiles, "
+    "NO server list and NO dialog. If the large centred ARMA REFORGER logo is the main "
+    "element and there are no menu tiles, choose 'splash'.\n"
+    "- 'other': none of the above, or not Arma Reforger at all — e.g. a blank/featureless "
+    "image, the desktop, or an unrelated app with no ARMA REFORGER branding.\n"
+    "Then set 'position' to the integer queue position if screen is 'in_queue', else 0, "
+    "and 'server_name' to the queued server's name if screen is 'in_queue', else empty string."
 )
+
+
+class Screen(str, Enum):
+    SPLASH = "splash"
+    MAIN_MENU = "main_menu"
+    SERVER_BROWSER = "server_browser"
+    IN_QUEUE = "in_queue"
+    IN_GAME = "in_game"
+    OTHER = "other"
 
 
 class QueueInfo(BaseModel):
@@ -67,10 +104,23 @@ class QueueInfo(BaseModel):
 
 
 class ScreenState(BaseModel):
-    in_queue: bool
-    in_game: bool
+    # `queue_dialog_visible` is filled FIRST on purpose: making the model commit to
+    # whether it can actually SEE the queue popup before it picks a `screen` acts as a
+    # reasoning scaffold that markedly stabilizes a lightweight model's classification —
+    # without it the splash/server_browser labels flake under greedy decoding. The
+    # watcher reads `screen` (via the properties below); this field only steers the model.
+    queue_dialog_visible: bool
+    screen: Screen
     position: int
     server_name: str
+
+    @property
+    def in_queue(self) -> bool:
+        return self.screen is Screen.IN_QUEUE
+
+    @property
+    def in_game(self) -> bool:
+        return self.screen is Screen.IN_GAME
 
 
 class _ArmaDetection(BaseModel):
@@ -115,6 +165,7 @@ class OllamaInference:
                 "images": [image_bytes],
             }],
             format=QueueInfo.model_json_schema(),
+            options=_GREEDY,
         )
         return _parse(response.message.content)
 
@@ -127,6 +178,7 @@ class OllamaInference:
                 "images": [image_bytes],
             }],
             format=_ArmaDetection.model_json_schema(),
+            options=_GREEDY,
         )
         try:
             return _ArmaDetection.model_validate_json(response.message.content).is_arma
@@ -142,11 +194,12 @@ class OllamaInference:
                 "images": [image_bytes],
             }],
             format=ScreenState.model_json_schema(),
+            options=_GREEDY,
         )
         try:
             return ScreenState.model_validate_json(response.message.content)
         except Exception:
-            return ScreenState(in_queue=False, in_game=False, position=0, server_name="")
+            return ScreenState(queue_dialog_visible=False, screen=Screen.OTHER, position=0, server_name="")
 
     def unload(self) -> None:
         """Evict the model from Ollama VRAM immediately (keep_alive=0)."""
@@ -270,7 +323,7 @@ class CloudInference:
         try:
             return ScreenState.model_validate_json(_coerce_json(content))
         except Exception:
-            return ScreenState(in_queue=False, in_game=False, position=0, server_name="")
+            return ScreenState(queue_dialog_visible=False, screen=Screen.OTHER, position=0, server_name="")
 
     def unload(self) -> None:
         """No-op — nothing runs locally in cloud mode."""
